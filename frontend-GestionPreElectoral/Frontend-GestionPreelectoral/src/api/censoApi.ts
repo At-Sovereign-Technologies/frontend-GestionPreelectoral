@@ -98,6 +98,30 @@ export async function registrarCiudadanoCenso(payload: RegistrarCiudadanoCensoPa
   return procesarRespuesta<RegistroCensoRespuesta>(response, "No fue posible registrar el ciudadano en el censo")
 }
 
+export interface ActualizarRegistroCensoPayload {
+  estado: EstadoCenso
+  causalEstado: CausalCenso | null
+  observacion: string
+}
+
+export async function actualizarRegistroCenso(
+  registroId: number,
+  payload: ActualizarRegistroCensoPayload
+): Promise<RegistroCensoRespuesta> {
+  const response = await fetch(buildGatewayUrl(`${CENSO_BASE}/registros/${registroId}`), {
+    method: "PUT",
+    headers: createJsonHeaders(getToken()),
+    body: JSON.stringify({
+      estado: payload.estado,
+      causalEstado: payload.causalEstado || null,
+      observacion: payload.observacion || null,
+      actor: obtenerActor(),
+    }),
+  })
+
+  return procesarRespuesta<RegistroCensoRespuesta>(response, "No fue posible actualizar el registro del censo")
+}
+
 export async function importarCensoCsv(eleccionId: number, archivo: File): Promise<string> {
   const datos = new FormData()
   datos.append("eleccionId", String(eleccionId))
@@ -112,6 +136,25 @@ export async function importarCensoCsv(eleccionId: number, archivo: File): Promi
 
   const resultado = await procesarRespuesta<{ mensaje?: string }>(response, "No fue posible importar el archivo CSV")
   return resultado.mensaje || "Importación CSV completada"
+}
+
+export interface CausalItem {
+  valor: CausalCenso
+  etiqueta: string
+}
+
+export interface CausalesEleccion {
+  excluido: CausalItem[]
+  exento: CausalItem[]
+}
+
+export async function obtenerCausalesEleccion(eleccionId: number): Promise<CausalesEleccion> {
+  const response = await fetch(buildGatewayUrl(`${ELECCIONES_BASE}/${eleccionId}/causales`), {
+    method: "GET",
+    headers: createJsonHeaders(getToken()),
+  })
+
+  return procesarRespuesta<CausalesEleccion>(response, "No fue posible obtener las causales configuradas")
 }
 
 export async function importarCensoApi(payload: ImportarCensoApiPayload): Promise<string> {

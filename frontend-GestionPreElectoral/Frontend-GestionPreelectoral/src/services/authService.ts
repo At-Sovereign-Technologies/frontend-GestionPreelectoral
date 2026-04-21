@@ -16,6 +16,8 @@ export interface AuthUser {
 interface TokenProfile {
   preferred_username?: string
   name?: string
+  realm_access?: { roles?: string[] }
+  resource_access?: Record<string, { roles?: string[] }>
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -34,6 +36,24 @@ function getTokenProfile(): TokenProfile | null {
   const token = getToken()
   if (!token) return null
   return decodeJwtPayload(token) as TokenProfile | null
+}
+
+// Devuelve todos los roles de realm_access y de cualquier resource_access del JWT de Keycloak
+export function getRolesDesdeToken(): string[] {
+  const perfil = getTokenProfile()
+  if (!perfil) return []
+
+  const rolesRealm: string[] = perfil.realm_access?.roles ?? []
+  const rolesRecursos: string[] = Object.values(perfil.resource_access ?? {}).flatMap(
+    (r) => r.roles ?? []
+  )
+
+  return [...new Set([...rolesRealm, ...rolesRecursos])]
+}
+
+export function tieneRol(rol: string): boolean {
+  const roles = getRolesDesdeToken()
+  return roles.includes(rol)
 }
 
 function resolveTokenExpiration(token: string, expiresIn?: number): number | null {

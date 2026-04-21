@@ -2,17 +2,14 @@ import { useEffect, useState } from "react"
 import {
   Search,
   Pencil,
-  Eye,
   ChevronLeft,
   ChevronRight,
   RefreshCw,
   Plus,
   Clock,
   Upload,
-  Shield,
   X,
   FileUp,
-  Database,
   UserPlus,
   CircleAlert,
 } from "lucide-react"
@@ -20,12 +17,15 @@ import UserMenu from "../components/UserMenu"
 import ComingSoonToast from "../components/ComingSoonToast"
 import Footer from "../components/Footer"
 import {
-  importarCensoApi,
+  actualizarRegistroCenso,
   importarCensoCsv,
   listarElecciones,
   listarRegistrosCenso,
+  obtenerCausalesEleccion,
   registrarCiudadanoCenso,
   type CausalCenso,
+  type CausalItem,
+  type CausalesEleccion,
   type EleccionResumen,
   type EstadoCenso,
   type RegistroCensoRespuesta,
@@ -45,22 +45,33 @@ interface RegistroCenso {
 
 const REGISTROS_POR_PAGINA = 10
 const TIPOS_DOCUMENTO = ["CC", "TI", "CE", "PA"]
-const CAUSALES_POR_ESTADO: Record<Exclude<EstadoCenso, "HABILITADO">, { valor: CausalCenso; etiqueta: string }[]> = {
-  EXCLUIDO: [
-    { valor: "FUERZA_PUBLICA_ACTIVA", etiqueta: "Fuerza Pública activa" },
+
+const CAUSALES_DEFECTO: CausalesEleccion = {
+  excluido: [
     { valor: "INTERDICCION_JUDICIAL", etiqueta: "Interdicción judicial" },
     { valor: "CONDENA_CON_PENA_ACCESORIA", etiqueta: "Condena con pena accesoria" },
   ],
-  EXENTO: [
+  exento: [
+    { valor: "FUERZA_PUBLICA_ACTIVA", etiqueta: "Personal activo fuerzas militares y policía" },
     { valor: "MAYOR_LIMITE_EDAD", etiqueta: "Mayor del límite de edad" },
     { valor: "DISCAPACIDAD_REGISTRADA", etiqueta: "Discapacidad registrada" },
   ],
 }
 
 type FiltroActivo = "TODOS" | EstadoCenso
-type ModalActivo = "NINGUNO" | "IMPORTAR" | "MANUAL"
-type TipoImportacion = "CSV" | "API"
+type ModalActivo = "NINGUNO" | "IMPORTAR" | "MANUAL" | "EDITAR"
 
+interface FormularioEditar {
+  estado: EstadoCenso
+  causalEstado: CausalCenso | ""
+  observacion: string
+}
+
+const FORMULARIO_EDITAR_INICIAL: FormularioEditar = {
+  estado: "HABILITADO",
+  causalEstado: "",
+  observacion: "",
+}
 interface FormularioManual {
   tipoDocumento: string
   numeroDocumento: string
@@ -179,10 +190,11 @@ export default function GestionCenso() {
   const [procesando, setProcesando] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [modalActivo, setModalActivo] = useState<ModalActivo>("NINGUNO")
-  const [tipoImportacion, setTipoImportacion] = useState<TipoImportacion>("CSV")
   const [archivoCsv, setArchivoCsv] = useState<File | null>(null)
-  const [urlApiExterna, setUrlApiExterna] = useState("")
+  const [registroEditando, setRegistroEditando] = useState<RegistroCenso | null>(null)
+  const [formularioEditar, setFormularioEditar] = useState<FormularioEditar>(FORMULARIO_EDITAR_INICIAL)
   const [formularioManual, setFormularioManual] = useState<FormularioManual>(FORMULARIO_INICIAL)
+  const [causalesEleccion, setCausalesEleccion] = useState<CausalesEleccion>(CAUSALES_DEFECTO)
 
   useEffect(() => {
     async function cargarElecciones() {
@@ -235,6 +247,15 @@ export default function GestionCenso() {
     void cargarRegistros()
   }, [eleccionActivaId])
 
+  useEffect(() => {
+    if (!eleccionActivaId) return
+    const eleccionId = eleccionActivaId
+
+    obtenerCausalesEleccion(eleccionId)
+      .then((causales) => setCausalesEleccion(causales))
+      .catch(() => setCausalesEleccion(CAUSALES_DEFECTO))
+  }, [eleccionActivaId])
+
   const registrosFiltrados = registros.filter((r) => {
     const coincideBusqueda =
       busqueda.trim() === "" ||
@@ -266,8 +287,56 @@ export default function GestionCenso() {
   function cerrarModal() {
     setModalActivo("NINGUNO")
     setArchivoCsv(null)
-    setUrlApiExterna("")
+    setRegistroEditando(null)
+    setFormularioEditar(FORMULARIO_EDITAR_INICIAL)
     setFormularioManual(FORMULARIO_INICIAL)
+  }
+
+  function abrirEdicion(registro: RegistroCenso) {
+    setRegistroEditando(registro)
+    setFormularioEditar({
+      estado: registro.estado,
+      causalEstado: registro.causalEstado ?? "",
+      observacion: registro.observacion ?? "",
+    })
+    setModalActivo("EDITAR")
+  }
+
+  async function manejarGuardarEdicion() {
+    if (!registroEditando) return
+    if (formularioEditar.estado !== "HABILITADO" && !formularioEditar.causalEstado) {
+      setError("Debes indicar la causal cuando el estado sea EXCLUIDO o EXENTO")
+      return
+    }
+    setProcesando(true)
+    setError(null)
+    try {
+      const actualizado = await actualizarRegistroCenso(registroEditando.id, {
+        estado: formularioEditar.estado,
+        causalEstado: formularioEditar.causalEstado || null,
+        observacion: formularioEditar.observacion,
+      })
+      setRegistros((prev) =>
+        prev.map((r) =>
+          r.id === registroEditando.id
+            ? {
+                ...r,
+                estado: actualizado.estado,
+                causalEstado: actualizado.causalEstado ?? null,
+                observacion: actualizado.observacion ?? null,
+                ultimaModificacion: formatearFecha(actualizado.fechaActualizacion),
+                actorUltimaModificacion: actualizado.actorUltimaModificacion,
+              }
+            : r
+        )
+      )
+      cerrarModal()
+      abrirToast("Registro actualizado correctamente")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No fue posible actualizar el registro")
+    } finally {
+      setProcesando(false)
+    }
   }
 
   async function recargarRegistros(): Promise<boolean> {
@@ -313,30 +382,6 @@ export default function GestionCenso() {
       abrirToast(mensaje)
     } catch (errorImportando) {
       setError(errorImportando instanceof Error ? errorImportando.message : "No fue posible importar el archivo CSV")
-    } finally {
-      setProcesando(false)
-    }
-  }
-
-  async function manejarImportacionApi() {
-    if (!eleccionActivaId || !urlApiExterna.trim()) {
-      setError("Debes indicar la URL de la API externa")
-      return
-    }
-
-    setProcesando(true)
-    setError(null)
-
-    try {
-      const mensaje = await importarCensoApi({
-        eleccionId: eleccionActivaId,
-        url: urlApiExterna.trim(),
-      })
-      await recargarRegistros()
-      cerrarModal()
-      abrirToast(mensaje)
-    } catch (errorImportando) {
-      setError(errorImportando instanceof Error ? errorImportando.message : "No fue posible importar desde la API externa")
     } finally {
       setProcesando(false)
     }
@@ -389,10 +434,12 @@ export default function GestionCenso() {
 
   const resumen = obtenerResumen(registros)
   const porcentajeHabilitados = resumen.total === 0 ? 0 : Math.round((resumen.habilitados / resumen.total) * 100)
-  const causalesDisponibles =
+  const causalesDisponibles: CausalItem[] =
     formularioManual.estado === "HABILITADO"
       ? []
-      : CAUSALES_POR_ESTADO[formularioManual.estado as Exclude<EstadoCenso, "HABILITADO">]
+      : formularioManual.estado === "EXCLUIDO"
+        ? causalesEleccion.excluido
+        : causalesEleccion.exento
 
   return (
     <div className="notranslate min-h-screen bg-gray-50 flex flex-col" translate="no">
@@ -576,18 +623,11 @@ export default function GestionCenso() {
                       <td className="py-3.5">
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => abrirToast("La edición de estado será la siguiente mejora sobre este módulo.")}
+                            onClick={() => abrirEdicion(registro)}
                             className="text-gray-400 hover:text-gray-700 transition"
                             aria-label="Editar registro"
                           >
                             <Pencil size={15} />
-                          </button>
-                          <button
-                            onClick={() => abrirToast(`Detalle de ${registro.nombreCompleto}: ${registro.estado}`)}
-                            className="text-gray-400 hover:text-gray-700 transition"
-                            aria-label="Ver detalle"
-                          >
-                            <Eye size={15} />
                           </button>
                         </div>
                       </td>
@@ -701,48 +741,7 @@ export default function GestionCenso() {
               </div>
             </div>
 
-            {/* Conectividad API */}
-            <div className="bg-red-50 border border-red-100 rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-6 h-6 rounded-full bg-red-100 border border-red-200 flex items-center justify-center">
-                  <RefreshCw size={12} className="text-red-500" />
-                </div>
-                <p className="text-sm font-semibold text-gray-900">Conectividad API</p>
-              </div>
-              <p className="text-xs text-gray-500 mb-3">
-                Sincronización automática activa con la Registraduría Nacional del Estado Civil.
-              </p>
-              <button
-                onClick={async () => {
-                  const actualizado = await recargarRegistros()
-                  if (actualizado) {
-                    abrirToast("Sincronización ejecutada contra gestion_pre_electoral.registros_censo")
-                  }
-                }}
-                className="w-full text-xs font-semibold text-red-600 border border-red-300 rounded-lg py-1.5 hover:bg-red-100 transition"
-              >
-                Verificar Sincronización
-              </button>
-            </div>
 
-            {/* Integridad de Datos */}
-            <div className="bg-gray-900 rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center">
-                  <Shield size={12} className="text-white" />
-                </div>
-                <p className="text-sm font-semibold text-white">Integridad de Datos</p>
-              </div>
-              <p className="text-xs text-gray-400 mb-3">
-                Blockchain Hash{" "}
-                <span className="text-green-400 font-mono">0x77a…</span>
-                <span className="text-red-400 font-mono"> — 98%</span>
-              </p>
-              <div className="flex items-center gap-1.5 bg-gray-800 rounded-lg px-2.5 py-1.5">
-                <span className="w-2 h-2 rounded-full bg-green-400" />
-                <span className="text-xs text-gray-300">Verificado por Auditoría Externa</span>
-              </div>
-            </div>
 
           </div>
         </div>
@@ -760,98 +759,113 @@ export default function GestionCenso() {
       {modalActivo === "IMPORTAR" && (
         <ModalBase
           titulo="Importar censo electoral"
-          subtitulo="Carga ciudadanos desde un archivo CSV o desde una API externa institucional."
+          subtitulo="Carga ciudadanos desde un archivo CSV."
           onClose={cerrarModal}
         >
-          <div className="mb-5 grid gap-3 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => setTipoImportacion("CSV")}
-              className={`rounded-xl border p-4 text-left transition ${
-                tipoImportacion === "CSV" ? "border-red-300 bg-red-50" : "border-gray-200 hover:bg-gray-50"
-              }`}
-            >
-              <div className="mb-2 flex items-center gap-2 text-gray-900">
-                <FileUp size={18} className="text-red-500" />
-                <span className="font-semibold">Importar CSV</span>
-              </div>
-              <p className="text-sm text-gray-500">Columnas requeridas: tipoDocumento, numeroDocumento, nombres, apellidos, fechaNacimiento, estado, causalEstado, observacion.</p>
-            </button>
+          <div className="space-y-4">
+            <label className="block rounded-xl border border-dashed border-gray-300 px-4 py-6 text-center text-sm text-gray-500">
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(event) => setArchivoCsv(event.target.files?.[0] ?? null)}
+              />
+              <span className="font-medium text-gray-700">{archivoCsv ? archivoCsv.name : "Seleccionar archivo CSV"}</span>
+              <span className="mt-1 block text-xs text-gray-400">Máximo 10MB. Usa UTF-8 y encabezados válidos.</span>
+            </label>
 
-            <button
-              type="button"
-              onClick={() => setTipoImportacion("API")}
-              className={`rounded-xl border p-4 text-left transition ${
-                tipoImportacion === "API" ? "border-red-300 bg-red-50" : "border-gray-200 hover:bg-gray-50"
-              }`}
-            >
-              <div className="mb-2 flex items-center gap-2 text-gray-900">
-                <Database size={18} className="text-red-500" />
-                <span className="font-semibold">Importar desde API</span>
-              </div>
-              <p className="text-sm text-gray-500">La API debe devolver un arreglo JSON de ciudadanos con la misma estructura esperada por el servicio.</p>
-            </button>
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={cerrarModal} className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={manejarImportacionCsv}
+                disabled={procesando}
+                className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:bg-red-300"
+              >
+                {procesando ? "Importando..." : "Importar CSV"}
+              </button>
+            </div>
+          </div>
+        </ModalBase>
+      )}
+
+      {modalActivo === "EDITAR" && registroEditando && (
+        <ModalBase
+          titulo="Editar registro del censo"
+          subtitulo={`Modifica el estado de ${registroEditando.nombreCompleto} (${registroEditando.tipoDocumento} ${registroEditando.cedula})`}
+          onClose={cerrarModal}
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Estado</label>
+              <select
+                value={formularioEditar.estado}
+                onChange={(e) => {
+                  const estado = e.target.value as EstadoCenso
+                  setFormularioEditar((f) => ({
+                    ...f,
+                    estado,
+                    causalEstado: estado === "HABILITADO" ? "" : f.causalEstado,
+                  }))
+                }}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+              >
+                <option value="HABILITADO">Habilitado</option>
+                <option value="EXCLUIDO">Excluido</option>
+                <option value="EXENTO">Exento</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Causal</label>
+              <select
+                value={formularioEditar.causalEstado}
+                disabled={formularioEditar.estado === "HABILITADO"}
+                onChange={(e) => setFormularioEditar((f) => ({ ...f, causalEstado: e.target.value as CausalCenso | "" }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:bg-gray-100"
+              >
+                <option value="">Sin causal</option>
+                {formularioEditar.estado !== "HABILITADO" &&
+                  (formularioEditar.estado === "EXCLUIDO" ? causalesEleccion.excluido : causalesEleccion.exento).map((c) => (
+                    <option key={c.valor} value={c.valor}>{c.etiqueta}</option>
+                  ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Observación</label>
+              <textarea
+                value={formularioEditar.observacion}
+                onChange={(e) => setFormularioEditar((f) => ({ ...f, observacion: e.target.value }))}
+                rows={3}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+              />
+            </div>
           </div>
 
-          {tipoImportacion === "CSV" ? (
-            <div className="space-y-4">
-              <label className="block rounded-xl border border-dashed border-gray-300 px-4 py-6 text-center text-sm text-gray-500">
-                <input
-                  type="file"
-                  accept=".csv,text/csv"
-                  className="hidden"
-                  onChange={(event) => setArchivoCsv(event.target.files?.[0] ?? null)}
-                />
-                <span className="font-medium text-gray-700">{archivoCsv ? archivoCsv.name : "Seleccionar archivo CSV"}</span>
-                <span className="mt-1 block text-xs text-gray-400">Máximo 10MB. Usa UTF-8 y encabezados válidos.</span>
-              </label>
-
-              <div className="flex justify-end gap-3">
-                <button type="button" onClick={cerrarModal} className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={manejarImportacionCsv}
-                  disabled={procesando}
-                  className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:bg-red-300"
-                >
-                  {procesando ? "Importando..." : "Importar CSV"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-600">URL de la API externa</label>
-                <input
-                  type="url"
-                  value={urlApiExterna}
-                  onChange={(event) => setUrlApiExterna(event.target.value)}
-                  placeholder="https://fuente-externa.gov.co/api/censo"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
-                />
-              </div>
-
-              <div className="rounded-xl bg-gray-50 px-4 py-3 text-xs text-gray-500">
-                La respuesta debe incluir un arreglo JSON con `tipoDocumento`, `numeroDocumento`, `nombres`, `apellidos`, `fechaNacimiento`, `estado`, `causalEstado` y `observacion`.
-              </div>
-
-              <div className="flex justify-end gap-3">
-                <button type="button" onClick={cerrarModal} className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={manejarImportacionApi}
-                  disabled={procesando}
-                  className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:bg-red-300"
-                >
-                  {procesando ? "Consultando..." : "Importar desde API"}
-                </button>
-              </div>
+          {error && (
+            <div className="mt-3 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+              <CircleAlert size={15} />
+              {error}
             </div>
           )}
+
+          <div className="mt-5 flex justify-end gap-3">
+            <button type="button" onClick={cerrarModal} className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={manejarGuardarEdicion}
+              disabled={procesando}
+              className="inline-flex items-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:bg-red-300"
+            >
+              <Pencil size={15} />
+              {procesando ? "Guardando..." : "Guardar cambios"}
+            </button>
+          </div>
         </ModalBase>
       )}
 
