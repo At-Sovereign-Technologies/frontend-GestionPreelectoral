@@ -16,6 +16,12 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      VITE_API_GATEWAY_URL: ${{ vars.VITE_API_GATEWAY_URL || 'https://eleccion.sello-legitimo.site/' }}
+      VITE_AUTHELIA_URL: ${{ vars.VITE_AUTHELIA_URL || 'https://127.0.0.1:9091' }}
+      VITE_OIDC_CLIENT_ID: ${{ vars.VITE_OIDC_CLIENT_ID || 'frontend-gestion-pre-electoral' }}
+      VITE_OIDC_REDIRECT_URI: ${{ vars.VITE_OIDC_REDIRECT_URI || 'http://localhost:5174/callback' }}
+      VITE_DEBUG_FRONTEND: ${{ vars.VITE_DEBUG_FRONTEND || 'false' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,6 +53,12 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          build-args: |
+            VITE_API_GATEWAY_URL=${{ env.VITE_API_GATEWAY_URL }}
+            VITE_AUTHELIA_URL=${{ env.VITE_AUTHELIA_URL }}
+            VITE_OIDC_CLIENT_ID=${{ env.VITE_OIDC_CLIENT_ID }}
+            VITE_OIDC_REDIRECT_URI=${{ env.VITE_OIDC_REDIRECT_URI }}
+            VITE_DEBUG_FRONTEND=${{ env.VITE_DEBUG_FRONTEND }}
           push: true
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
