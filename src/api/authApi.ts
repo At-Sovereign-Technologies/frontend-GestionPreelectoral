@@ -1,6 +1,6 @@
 ﻿import { debugLog } from "../utils/debugLogger"
 
-const DEFAULT_AUTHELIA_URL = "https://127.0.0.1:9091"
+const DEFAULT_AUTHELIA_URL = "https://auth.sello-legitimo.site/"
 
 function getEnv(name: string, fallback?: string): string {
   const value = (import.meta.env[name] as string | undefined)?.trim()

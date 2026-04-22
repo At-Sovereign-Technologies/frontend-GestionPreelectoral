@@ -1,4 +1,4 @@
-const DEFAULT_GATEWAY_URL = "http://localhost:8080"
+const DEFAULT_GATEWAY_URL = "https://eleccion.sello-legitimo.site/"
 
 function normalizePath(path: string): string {
   return path.startsWith("/") ? path : `/${path}`
