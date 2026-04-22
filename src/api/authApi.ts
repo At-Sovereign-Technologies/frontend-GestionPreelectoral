@@ -1,73 +1,117 @@
-import { debugLog } from "../utils/debugLogger"
+﻿import { debugLog } from "../utils/debugLogger"
 
-const DEFAULT_KEYCLOAK_BASE_URL = "http://localhost:8090"
-const DEFAULT_KEYCLOAK_REALM = "sello-legitimo-auth"
+const DEFAULT_AUTHELIA_URL = "https://127.0.0.1:9091"
 
-function getRequiredEnv(name: string, fallback?: string): string {
+function getEnv(name: string, fallback?: string): string {
   const value = (import.meta.env[name] as string | undefined)?.trim()
   if (value) return value
-  if (fallback) return fallback
+  if (fallback !== undefined) return fallback
   throw new Error(`Falta configurar ${name} en el frontend.`)
 }
 
-function buildTokenUrl(): string {
-  const baseUrl = getRequiredEnv("VITE_KEYCLOAK_BASE_URL", DEFAULT_KEYCLOAK_BASE_URL)
-  const realm = getRequiredEnv("VITE_KEYCLOAK_REALM", DEFAULT_KEYCLOAK_REALM)
-  return `${baseUrl}/realms/${realm}/protocol/openid-connect/token`
+function getAutheliaUrl(): string {
+  return getEnv("VITE_AUTHELIA_URL", DEFAULT_AUTHELIA_URL)
 }
 
-export interface LoginPayload {
-  username: string
-  password: string
+function getClientId(): string {
+  return getEnv("VITE_OIDC_CLIENT_ID")
 }
+
+function getRedirectUri(): string {
+  return getEnv("VITE_OIDC_REDIRECT_URI", `${window.location.origin}/callback`)
+}
+
+// ─── PKCE helpers ────────────────────────────────────────────────────────────
+
+function generateRandomString(byteLength: number): string {
+  const array = new Uint8Array(byteLength)
+  crypto.getRandomValues(array)
+  return Array.from(array, (b) => b.toString(16).padStart(2, "0")).join("")
+}
+
+async function sha256(plain: string): Promise<ArrayBuffer> {
+  const data = new TextEncoder().encode(plain)
+  return crypto.subtle.digest("SHA-256", data)
+}
+
+function base64UrlEncode(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf)
+  let str = ""
+  for (const byte of bytes) str += String.fromCharCode(byte)
+  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
+}
+
+// ─── Public API ──────────────────────────────────────────────────────────────
 
 export interface LoginResponse {
   token: string
+  idToken?: string
   refreshToken?: string
   expiresIn?: number
 }
 
-function normalizeKeycloakError(status: number, body: unknown): string {
-  const payload = body && typeof body === "object" ? body as Record<string, unknown> : {}
-  const errorCode = typeof payload.error === "string" ? payload.error : ""
-  const errorDescription = typeof payload.error_description === "string" ? payload.error_description : ""
-  const message = typeof payload.message === "string" ? payload.message : ""
+/**
+ * Genera la URL de autorizacion OIDC con PKCE y guarda el verifier/state
+ * en sessionStorage. Redirige al portal de login de Authelia.
+ */
+export async function initiateAutheliaLogin(): Promise<void> {
+  const codeVerifier = generateRandomString(64)
+  const state = generateRandomString(32)
 
-  if (errorCode === "invalid_client") {
-    return "El cliente de Keycloak configurado en el frontend no existe o no permite este tipo de login."
-  }
+  const hashed = await sha256(codeVerifier)
+  const codeChallenge = base64UrlEncode(hashed)
 
-  if (errorCode === "invalid_grant" || status === 401) {
-    return "Credenciales incorrectas o usuario no autorizado en Keycloak."
-  }
+  sessionStorage.setItem("pkce_verifier", codeVerifier)
+  sessionStorage.setItem("oauth_state", state)
 
-  return errorDescription || message || "Error al iniciar sesión con Keycloak"
-}
-
-export async function postLogin(payload: LoginPayload): Promise<LoginResponse> {
-  const tokenUrl = buildTokenUrl()
-  const clientId = getRequiredEnv("VITE_KEYCLOAK_CLIENT_ID")
-  const body = new URLSearchParams({
-    client_id: clientId,
-    grant_type: "password",
-    username: payload.username,
-    password: payload.password,
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: getClientId(),
+    redirect_uri: getRedirectUri(),
+    scope: "openid profile email groups",
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+    state,
   })
 
-  const scope = (import.meta.env.VITE_KEYCLOAK_SCOPE as string | undefined)?.trim()
-  if (scope) {
-    body.set("scope", scope)
+  const url = `${getAutheliaUrl()}/api/oidc/authorization?${params.toString()}`
+  debugLog("auth", "Redirigiendo a Authelia para autenticacion", { url })
+  window.location.href = url
+}
+
+/**
+ * Intercambia el authorization code por tokens.
+ * Valida el state para prevenir ataques CSRF.
+ */
+export async function exchangeCodeForToken(code: string, state: string): Promise<LoginResponse> {
+  const storedState = sessionStorage.getItem("oauth_state")
+  if (!storedState || state !== storedState) {
+    throw new Error("Estado OAuth2 invalido. Posible ataque CSRF, inicia sesion nuevamente.")
   }
 
-  debugLog("auth", "Solicitando token a Keycloak", {
+  const codeVerifier = sessionStorage.getItem("pkce_verifier")
+  if (!codeVerifier) {
+    throw new Error("PKCE verifier no encontrado. Inicia sesion nuevamente.")
+  }
+
+  sessionStorage.removeItem("pkce_verifier")
+  sessionStorage.removeItem("oauth_state")
+
+  const tokenUrl = "/authelia-proxy/api/oidc/token"
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: getClientId(),
+    redirect_uri: getRedirectUri(),
+    code,
+    code_verifier: codeVerifier,
+  })
+
+  debugLog("auth", "Intercambiando codigo por token en Authelia", {
     url: tokenUrl,
-    clientId,
-    username: payload.username,
-    scope,
+    clientId: getClientId(),
   })
 
   let response: Response
-
   try {
     response = await fetch(tokenUrl, {
       method: "POST",
@@ -75,49 +119,114 @@ export async function postLogin(payload: LoginPayload): Promise<LoginResponse> {
       body: body.toString(),
     })
   } catch (error) {
-    debugLog("auth", "Fallo de red al solicitar token", {
-      url: tokenUrl,
-      error: error instanceof Error ? error.message : String(error),
-    })
-    throw error
+    debugLog("auth", "Fallo de red al conectar con Authelia", { error })
+    throw new Error("No se pudo conectar con Authelia. Verifica que el servicio este activo.")
   }
-
-  debugLog("auth", "Respuesta recibida desde Keycloak", {
-    url: tokenUrl,
-    status: response.status,
-    ok: response.ok,
-  })
 
   const responseBody = await response.json().catch(() => null)
 
   if (!response.ok) {
-    debugLog("auth", "Keycloak rechazó el login", responseBody)
-    throw new Error(normalizeKeycloakError(response.status, responseBody))
+    const data = (responseBody ?? {}) as Record<string, unknown>
+    const description = typeof data.error_description === "string" ? data.error_description : ""
+    const code_ = typeof data.error === "string" ? data.error : ""
+
+    if (code_ === "invalid_grant") {
+      throw new Error("Codigo de autorizacion invalido o expirado.")
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("Acceso no autorizado en Authelia.")
+    }
+    throw new Error(description || "Error al obtener token de Authelia.")
   }
 
   const data = (responseBody ?? {}) as {
     access_token: string
+    id_token?: string
     refresh_token?: string
     expires_in?: number
   }
 
   if (typeof data.access_token !== "string" || !data.access_token.trim()) {
-    debugLog("auth", "Keycloak respondió sin access_token válido", {
-      clientId,
-      body: responseBody,
-    })
-    throw new Error("Keycloak respondió correctamente, pero no entregó un JWT válido.")
+    throw new Error("Authelia respondio sin access_token valido.")
   }
 
-  debugLog("auth", "Token recibido correctamente", {
+  debugLog("auth", "Tokens recibidos desde Authelia", {
+    hasAccessToken: true,
+    hasIdToken: Boolean(data.id_token),
     expiresIn: data.expires_in,
-    hasAccessToken: Boolean(data.access_token),
-    hasRefreshToken: Boolean(data.refresh_token),
   })
 
   return {
     token: data.access_token,
+    idToken: data.id_token,
     refreshToken: data.refresh_token,
     expiresIn: data.expires_in,
   }
 }
+
+/**
+ * Login headless con formulario propio: envía usuario/contraseña directamente a la API de
+ * Authelia a través del proxy de Vite (/authelia-proxy), sin redirigir al portal de Authelia.
+ * Al autenticar correctamente navega al /callback con el authorization code.
+ */
+export async function loginWithCredentials(username: string, password: string): Promise<void> {
+  const codeVerifier = generateRandomString(64)
+  const state = generateRandomString(32)
+  const hashed = await sha256(codeVerifier)
+  const codeChallenge = base64UrlEncode(hashed)
+
+  sessionStorage.setItem("pkce_verifier", codeVerifier)
+  sessionStorage.setItem("oauth_state", state)
+
+  const authParams = new URLSearchParams({
+    response_type: "code",
+    client_id: getClientId(),
+    redirect_uri: getRedirectUri(),
+    scope: "openid profile email groups",
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+    state,
+  })
+
+  const proxyBase = "/authelia-proxy"
+
+  // Paso 1: Iniciar el flujo OIDC para crear la solicitud de autorización pendiente en sesión
+  await fetch(`${proxyBase}/api/oidc/authorization?${authParams.toString()}`, {
+    credentials: "include",
+    redirect: "manual",
+  })
+
+  // Paso 2: Enviar credenciales al firstfactor de Authelia
+  const resp = await fetch(`${proxyBase}/api/firstfactor`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ username, password, keepMeLoggedIn: false }),
+  })
+
+  if (!resp.ok) {
+    let message = "Usuario o contraseña incorrectos."
+    try {
+      const body = (await resp.json()) as { message?: string; status?: string }
+      if (body.message) message = body.message
+    } catch { /* ignore */ }
+    throw new Error(message)
+  }
+
+  const resData = (await resp.json()) as { status: string; data?: { redirect?: string } }
+
+  if (resData.status !== "OK") {
+    throw new Error("Usuario o contraseña incorrectos.")
+  }
+
+  debugLog("auth", "Firstfactor exitoso, redirigiendo con codigo", { hasRedirect: Boolean(resData.data?.redirect) })
+
+  // Paso 3: Navegar al callback con el codigo de autorización
+  if (resData.data?.redirect) {
+    window.location.href = resData.data.redirect
+  } else {
+    // Fallback: completar autorización directamente vía proxy
+    window.location.href = `${proxyBase}/api/oidc/authorization?${authParams.toString()}`
+  }
+}
+

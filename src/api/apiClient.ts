@@ -1,4 +1,4 @@
-const DEFAULT_GATEWAY_URL = "http://localhost:8091"
+const DEFAULT_GATEWAY_URL = "http://localhost:8080"
 
 function normalizePath(path: string): string {
   return path.startsWith("/") ? path : `/${path}`
