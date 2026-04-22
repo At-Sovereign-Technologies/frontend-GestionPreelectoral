@@ -97,7 +97,7 @@ export async function exchangeCodeForToken(code: string, state: string): Promise
   sessionStorage.removeItem("pkce_verifier")
   sessionStorage.removeItem("oauth_state")
 
-  const tokenUrl = "/authelia-proxy/api/oidc/token"
+  const tokenUrl = "https://auth.sello-legitimo.site/"
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: getClientId(),
@@ -188,7 +188,7 @@ export async function loginWithCredentials(username: string, password: string): 
     state,
   })
 
-  const proxyBase = "/authelia-proxy"
+  const proxyBase = "https://auth.sello-legitimo.site/"
 
   // Paso 1: Iniciar el flujo OIDC para crear la solicitud de autorización pendiente en sesión
   await fetch(`${proxyBase}/api/oidc/authorization?${authParams.toString()}`, {
