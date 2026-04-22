@@ -1,11 +1,16 @@
-const DEFAULT_GATEWAY_URL = "https://eleccion.sello-legitimo.site/"
+const DEFAULT_GATEWAY_URL = "https://eleccion.sello-legitimo.site"
+
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/+$/, "")
+}
 
 function normalizePath(path: string): string {
   return path.startsWith("/") ? path : `/${path}`
 }
 
 export function getGatewayBaseUrl(): string {
-  return (import.meta.env.VITE_API_GATEWAY_URL as string | undefined)?.trim() || DEFAULT_GATEWAY_URL
+  const configuredUrl = (import.meta.env.VITE_API_GATEWAY_URL as string | undefined)?.trim()
+  return normalizeBaseUrl(configuredUrl || DEFAULT_GATEWAY_URL)
 }
 
 export function buildGatewayUrl(path: string): string {

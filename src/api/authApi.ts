@@ -1,6 +1,10 @@
 ﻿import { debugLog } from "../utils/debugLogger"
 
-const DEFAULT_AUTHELIA_URL = "https://auth.sello-legitimo.site/"
+const DEFAULT_AUTHELIA_URL = "https://auth.sello-legitimo.site"
+
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/+$/, "")
+}
 
 function getEnv(name: string, fallback?: string): string {
   const value = (import.meta.env[name] as string | undefined)?.trim()
@@ -10,7 +14,7 @@ function getEnv(name: string, fallback?: string): string {
 }
 
 function getAutheliaUrl(): string {
-  return getEnv("VITE_AUTHELIA_URL", DEFAULT_AUTHELIA_URL)
+  return normalizeBaseUrl(getEnv("VITE_AUTHELIA_URL", DEFAULT_AUTHELIA_URL))
 }
 
 function getClientId(): string {
@@ -97,7 +101,7 @@ export async function exchangeCodeForToken(code: string, state: string): Promise
   sessionStorage.removeItem("pkce_verifier")
   sessionStorage.removeItem("oauth_state")
 
-  const tokenUrl = "https://auth.sello-legitimo.site/"
+  const tokenUrl = `${getAutheliaUrl()}/api/oidc/token`
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: getClientId(),
@@ -188,7 +192,7 @@ export async function loginWithCredentials(username: string, password: string): 
     state,
   })
 
-  const proxyBase = "https://auth.sello-legitimo.site/"
+  const proxyBase = getAutheliaUrl()
 
   // Paso 1: Iniciar el flujo OIDC para crear la solicitud de autorización pendiente en sesión
   await fetch(`${proxyBase}/api/oidc/authorization?${authParams.toString()}`, {
