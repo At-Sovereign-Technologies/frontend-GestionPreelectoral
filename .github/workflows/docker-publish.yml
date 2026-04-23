@@ -20,7 +20,7 @@ jobs:
       VITE_API_GATEWAY_URL: ${{ vars.VITE_API_GATEWAY_URL || 'https://eleccion.sello-legitimo.site/' }}
       VITE_AUTHELIA_URL: ${{ vars.VITE_AUTHELIA_URL || 'https://auth.sello-legitimo.site/' }}
       VITE_OIDC_CLIENT_ID: ${{ vars.VITE_OIDC_CLIENT_ID || 'frontend-gestion-pre-electoral' }}
-      VITE_OIDC_REDIRECT_URI: ${{ vars.VITE_OIDC_REDIRECT_URI || 'http://eleccion.sello-legitimo.site/' }}
+      VITE_OIDC_REDIRECT_URI: ${{ vars.VITE_OIDC_REDIRECT_URI || 'https://eleccion.sello-legitimo.site/callback' }}
       VITE_DEBUG_FRONTEND: ${{ vars.VITE_DEBUG_FRONTEND || 'false' }}
     steps:
       - name: Checkout

@@ -6,6 +6,13 @@ function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "")
 }
 
+function resolveAbsoluteUrl(value: string | undefined, fallback: string): string {
+  const trimmed = value?.trim()
+  if (!trimmed) return fallback
+  if (!/^https?:\/\//i.test(trimmed)) return fallback
+  return normalizeBaseUrl(trimmed)
+}
+
 function getEnv(name: string, fallback?: string): string {
   const value = (import.meta.env[name] as string | undefined)?.trim()
   if (value) return value
@@ -14,7 +21,7 @@ function getEnv(name: string, fallback?: string): string {
 }
 
 function getAutheliaUrl(): string {
-  return normalizeBaseUrl(getEnv("VITE_AUTHELIA_URL", DEFAULT_AUTHELIA_URL))
+  return resolveAbsoluteUrl(import.meta.env.VITE_AUTHELIA_URL as string | undefined, DEFAULT_AUTHELIA_URL)
 }
 
 function getClientId(): string {
@@ -170,7 +177,7 @@ export async function exchangeCodeForToken(code: string, state: string): Promise
 
 /**
  * Login headless con formulario propio: envía usuario/contraseña directamente a la API de
- * Authelia a través del proxy de Vite (/authelia-proxy), sin redirigir al portal de Authelia.
+ * Authelia usando su base URL pública, sin pasar por un proxy local.
  * Al autenticar correctamente navega al /callback con el authorization code.
  */
 export async function loginWithCredentials(username: string, password: string): Promise<void> {
@@ -192,16 +199,16 @@ export async function loginWithCredentials(username: string, password: string): 
     state,
   })
 
-  const proxyBase = getAutheliaUrl()
+  const autheliaBaseUrl = getAutheliaUrl()
 
   // Paso 1: Iniciar el flujo OIDC para crear la solicitud de autorización pendiente en sesión
-  await fetch(`${proxyBase}/api/oidc/authorization?${authParams.toString()}`, {
+  await fetch(`${autheliaBaseUrl}/api/oidc/authorization?${authParams.toString()}`, {
     credentials: "include",
     redirect: "manual",
   })
 
   // Paso 2: Enviar credenciales al firstfactor de Authelia
-  const resp = await fetch(`${proxyBase}/api/firstfactor`, {
+  const resp = await fetch(`${autheliaBaseUrl}/api/firstfactor`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -229,8 +236,8 @@ export async function loginWithCredentials(username: string, password: string): 
   if (resData.data?.redirect) {
     window.location.href = resData.data.redirect
   } else {
-    // Fallback: completar autorización directamente vía proxy
-    window.location.href = `${proxyBase}/api/oidc/authorization?${authParams.toString()}`
+    // Fallback: completar autorización directamente contra Authelia
+    window.location.href = `${autheliaBaseUrl}/api/oidc/authorization?${authParams.toString()}`
   }
 }
 
