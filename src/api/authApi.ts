@@ -79,7 +79,7 @@ export async function initiateAutheliaLogin(): Promise<void> {
     response_type: "code",
     client_id: getClientId(),
     redirect_uri: getRedirectUri(),
-    scope: "openid profile email groups",
+    scope: "openid profile email",
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
     state,
@@ -193,7 +193,7 @@ export async function loginWithCredentials(username: string, password: string): 
     response_type: "code",
     client_id: getClientId(),
     redirect_uri: getRedirectUri(),
-    scope: "openid profile email groups",
+    scope: "openid profile email",
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
     state,
@@ -201,13 +201,7 @@ export async function loginWithCredentials(username: string, password: string): 
 
   const autheliaBaseUrl = getAutheliaUrl()
 
-  // Paso 1: Iniciar el flujo OIDC para crear la solicitud de autorización pendiente en sesión
-  await fetch(`${autheliaBaseUrl}/api/oidc/authorization?${authParams.toString()}`, {
-    credentials: "include",
-    redirect: "manual",
-  })
-
-  // Paso 2: Enviar credenciales al firstfactor de Authelia
+  // Paso 1: Enviar credenciales al firstfactor de Authelia para establecer sesión
   const resp = await fetch(`${autheliaBaseUrl}/api/firstfactor`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -230,14 +224,9 @@ export async function loginWithCredentials(username: string, password: string): 
     throw new Error("Usuario o contraseña incorrectos.")
   }
 
-  debugLog("auth", "Firstfactor exitoso, redirigiendo con codigo", { hasRedirect: Boolean(resData.data?.redirect) })
+  debugLog("auth", "Firstfactor exitoso, redirigiendo a autorización OIDC")
 
-  // Paso 3: Navegar al callback con el codigo de autorización
-  if (resData.data?.redirect) {
-    window.location.href = resData.data.redirect
-  } else {
-    // Fallback: completar autorización directamente contra Authelia
-    window.location.href = `${autheliaBaseUrl}/api/oidc/authorization?${authParams.toString()}`
-  }
+  // Paso 2: Redirigir al endpoint de autorización OIDC con la sesión ya autenticada
+  window.location.href = `${autheliaBaseUrl}/api/oidc/authorization?${authParams.toString()}`
 }
 
