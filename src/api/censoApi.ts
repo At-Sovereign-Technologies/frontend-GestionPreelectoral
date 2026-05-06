@@ -23,11 +23,28 @@ export interface RegistroCensoRespuesta {
   nombres: string
   apellidos: string
   fechaNacimiento: string | null
+  departamento: string | null
+  municipio: string | null
   estado: EstadoCenso
   causalEstado: CausalCenso | null
   observacion: string | null
   actorUltimaModificacion: string
   fechaActualizacion: string
+}
+
+export interface PaginaCensoRespuesta {
+  contenido: RegistroCensoRespuesta[]
+  totalElementos: number
+  totalPaginas: number
+  numeroPagina: number
+  tamanoPagina: number
+}
+
+export interface ResumenCenso {
+  total: number
+  habilitados: number
+  excluidos: number
+  exentos: number
 }
 
 export interface RegistrarCiudadanoCensoPayload {
@@ -37,6 +54,8 @@ export interface RegistrarCiudadanoCensoPayload {
   nombres: string
   apellidos: string
   fechaNacimiento: string | null
+  departamento?: string | null
+  municipio?: string | null
   estado: EstadoCenso
   causalEstado: CausalCenso | null
   observacion: string
@@ -75,13 +94,37 @@ export async function listarElecciones(): Promise<EleccionResumen[]> {
   return procesarRespuesta<EleccionResumen[]>(response, "No fue posible cargar las elecciones configuradas")
 }
 
-export async function listarRegistrosCenso(eleccionId: number): Promise<RegistroCensoRespuesta[]> {
-  const response = await fetch(buildGatewayUrl(`${CENSO_BASE}/elecciones/${eleccionId}/registros`), {
+export async function listarRegistrosCenso(
+  eleccionId: number,
+  estado: string | null,
+  search: string | null,
+  pagina: number,
+  tamano: number
+): Promise<PaginaCensoRespuesta> {
+  const params = new URLSearchParams()
+  params.append("pagina", String(pagina))
+  params.append("tamano", String(tamano))
+  if (estado) params.append("estado", estado)
+  if (search) params.append("search", search)
+
+  const response = await fetch(
+    buildGatewayUrl(`${CENSO_BASE}/elecciones/${eleccionId}/registros?${params.toString()}`),
+    {
+      method: "GET",
+      headers: createJsonHeaders(getToken()),
+    }
+  )
+
+  return procesarRespuesta<PaginaCensoRespuesta>(response, "No fue posible cargar el censo electoral")
+}
+
+export async function obtenerResumenCenso(eleccionId: number): Promise<ResumenCenso> {
+  const response = await fetch(buildGatewayUrl(`${CENSO_BASE}/elecciones/${eleccionId}/resumen`), {
     method: "GET",
     headers: createJsonHeaders(getToken()),
   })
 
-  return procesarRespuesta<RegistroCensoRespuesta[]>(response, "No fue posible cargar el censo electoral")
+  return procesarRespuesta<ResumenCenso>(response, "No fue posible cargar el resumen del censo")
 }
 
 export async function registrarCiudadanoCenso(payload: RegistrarCiudadanoCensoPayload): Promise<RegistroCensoRespuesta> {

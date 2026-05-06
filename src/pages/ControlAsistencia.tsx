@@ -22,6 +22,10 @@ import {
   type Asistencia,
   type EstadoAsistencia,
 } from "../api/juradosApi"
+import {
+  listarElecciones,
+  type EleccionResumen,
+} from "../api/censoApi"
 
 const TABS = [
   { label: "Sorteo de Jurados", path: "/jurados/sorteo" },
@@ -106,35 +110,25 @@ export default function ControlAsistencia() {
   const [juradoSeleccionado, setJuradoSeleccionado] = useState<Jurado | null>(null)
   const [estadoAsistencia, setEstadoAsistencia] = useState<"PRESENTE" | "AUSENTE">("PRESENTE")
   const [observacion, setObservacion] = useState("")
-
-  function abrirToast(mensaje: string) {
-    setMensajeToast(mensaje)
-    setMostrarToast(true)
-  }
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  const [elecciones, setElecciones] = useState<EleccionResumen[]>([])
+  const [eleccionSeleccionadaId, setEleccionSeleccionadaId] = useState<number | null>(null)
 
   async function cargarDatos() {
     setCargando(true)
-    setError(null)
     try {
-      const [juradosData, asistenciasData] = await Promise.all([
-        listarTodosJurados(),
-        listarTodasAsistencias(),
-      ])
-      setJurados(juradosData)
-      setAsistencias(asistenciasData)
+      const [j, a] = await Promise.all([listarTodosJurados(), listarTodasAsistencias()])
+      setJurados(j)
+      setAsistencias(a)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No fue posible cargar los datos")
+      setError(err instanceof Error ? err.message : "Error al cargar datos")
     } finally {
       setCargando(false)
     }
   }
 
-  useEffect(() => {
-    void cargarDatos()
-  }, [])
-
   function asistenciaDeJurado(juradoId: string): Asistencia | undefined {
-    return asistencias.find((a) => a.juradoId === juradoId)
+    return asistenciasDeEleccion.find((a) => a.juradoId === juradoId)
   }
 
   function abrirModalAsistencia(jurado: Jurado, estado: "PRESENTE" | "AUSENTE") {
@@ -147,35 +141,42 @@ export default function ControlAsistencia() {
   function cerrarModal() {
     setModalActivo("NINGUNO")
     setJuradoSeleccionado(null)
-    setObservacion("")
+    setFormErrors({})
   }
 
   async function manejarRegistrarAsistencia() {
     if (!juradoSeleccionado) return
     setProcesando(true)
-    setError(null)
     try {
       await registrarAsistencia({
         juradoId: juradoSeleccionado.id,
         mesaId: juradoSeleccionado.mesaId,
         estado: estadoAsistencia,
-        observacion: observacion.trim() || undefined,
+        observacion: observacion || undefined,
       })
-      await cargarDatos()
+      setMensajeToast("Asistencia registrada correctamente")
+      setMostrarToast(true)
       cerrarModal()
-      abrirToast(
-        estadoAsistencia === "AUSENTE"
-          ? "Asistencia registrada: AUSENTE. Se generó reemplazo automático."
-          : "Asistencia registrada: PRESENTE"
-      )
+      await cargarDatos()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No fue posible registrar la asistencia")
+      setError(err instanceof Error ? err.message : "Error al registrar asistencia")
     } finally {
       setProcesando(false)
     }
   }
 
-  const juradosFiltrados = jurados.filter((j) => {
+  const juradosDeEleccion = eleccionSeleccionadaId === null
+    ? jurados
+    : jurados.filter((j) => j.eleccionId === eleccionSeleccionadaId)
+
+  const asistenciasDeEleccion = eleccionSeleccionadaId === null
+    ? asistencias
+    : asistencias.filter((a) => {
+        const jurado = jurados.find((j) => j.id === a.juradoId)
+        return jurado?.eleccionId === eleccionSeleccionadaId
+      })
+
+  const juradosFiltrados = juradosDeEleccion.filter((j) => {
     const termino = busqueda.trim().toLowerCase()
     if (!termino) return true
     return (
@@ -185,9 +186,17 @@ export default function ControlAsistencia() {
     )
   })
 
-  const presentes = asistencias.filter((a) => a.estado === "PRESENTE").length
-  const ausentes = asistencias.filter((a) => a.estado === "AUSENTE").length
-  const pendientes = jurados.length - asistencias.length
+  const presentes = asistenciasDeEleccion.filter((a) => a.estado === "PRESENTE").length
+  const ausentes = asistenciasDeEleccion.filter((a) => a.estado === "AUSENTE").length
+  const pendientes = juradosDeEleccion.length - asistenciasDeEleccion.length
+
+  useEffect(() => {
+    void cargarDatos()
+    listarElecciones()
+      .then(setElecciones)
+      .catch(() => setElecciones([]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div className="notranslate min-h-screen bg-gray-50 flex flex-col" translate="no">
@@ -249,15 +258,42 @@ export default function ControlAsistencia() {
                 </button>
               </div>
 
-              <div className="relative flex-1 max-w-xs mb-4">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  value={busqueda}
-                  onChange={(e) => setBusqueda(e.target.value)}
-                  placeholder="Buscar por cédula o nombre..."
-                  className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-300"
-                />
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                <div className="relative flex-1 min-w-[12rem] max-w-xs">
+                  <label className="block text-[10px] font-semibold text-gray-400 tracking-widest uppercase mb-1">
+                    Elección
+                  </label>
+                  <select
+                    value={eleccionSeleccionadaId ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setEleccionSeleccionadaId(val ? Number(val) : null)
+                    }}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+                  >
+                    <option value="">Todas las elecciones</option>
+                    {elecciones.map((eleccion) => (
+                      <option key={eleccion.id} value={eleccion.id}>
+                        {eleccion.nombreOficial}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="relative flex-1 min-w-[12rem] max-w-xs">
+                  <label className="block text-[10px] font-semibold text-gray-400 tracking-widest uppercase mb-1">
+                    Búsqueda
+                  </label>
+                  <div className="relative">
+                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      value={busqueda}
+                      onChange={(e) => setBusqueda(e.target.value)}
+                      placeholder="Buscar por cédula o nombre..."
+                      className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-300"
+                    />
+                  </div>
+                </div>
               </div>
 
               <table className="w-full text-sm">
@@ -348,14 +384,14 @@ export default function ControlAsistencia() {
                   </tr>
                 </thead>
                 <tbody>
-                  {asistencias.length === 0 && (
+                  {asistenciasDeEleccion.length === 0 && (
                     <tr>
                       <td colSpan={4} className="py-10 text-center text-sm text-gray-400">
                         No hay registros de asistencia.
                       </td>
                     </tr>
                   )}
-                  {asistencias.map((asistencia) => {
+                  {asistenciasDeEleccion.map((asistencia) => {
                     const jurado = jurados.find((j) => j.id === asistencia.juradoId)
                     return (
                       <tr key={asistencia.id} className="border-b last:border-0 hover:bg-gray-50 transition">
@@ -405,7 +441,7 @@ export default function ControlAsistencia() {
                 </div>
                 <div className="border-t pt-3 flex items-center justify-between">
                   <span className="text-sm text-gray-600">Total jurados</span>
-                  <span className="text-base font-bold text-gray-900">{jurados.length}</span>
+                  <span className="text-base font-bold text-gray-900">{juradosDeEleccion.length}</span>
                 </div>
               </div>
             </div>
@@ -441,6 +477,9 @@ export default function ControlAsistencia() {
           onClose={cerrarModal}
         >
           <div className="space-y-4">
+            {formErrors.juradoId && (
+              <p className="text-xs text-red-600">{formErrors.juradoId}</p>
+            )}
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-600">Estado</label>
               <div className="flex gap-3">

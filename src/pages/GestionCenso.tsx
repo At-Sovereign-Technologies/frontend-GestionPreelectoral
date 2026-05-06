@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   Search,
   Pencil,
@@ -20,6 +21,7 @@ import {
   listarElecciones,
   listarRegistrosCenso,
   obtenerCausalesEleccion,
+  obtenerResumenCenso,
   registrarCiudadanoCenso,
   type CausalCenso,
   type CausalItem,
@@ -27,12 +29,16 @@ import {
   type EleccionResumen,
   type EstadoCenso,
   type RegistroCensoRespuesta,
+  type ResumenCenso,
 } from "../api/censoApi"
+import { listarDocumentosCandidaturas } from "../api/candidaturasApi"
 
 interface RegistroCenso {
   id: number
   cedula: string
   nombreCompleto: string
+  departamento: string | null
+  municipio: string | null
   estado: EstadoCenso
   ultimaModificacion: string
   tipoDocumento: string
@@ -75,6 +81,8 @@ interface FormularioManual {
   numeroDocumento: string
   nombres: string
   apellidos: string
+  departamento: string
+  municipio: string
   fechaNacimiento: string
   estado: EstadoCenso
   causalEstado: CausalCenso | ""
@@ -86,6 +94,8 @@ const FORMULARIO_INICIAL: FormularioManual = {
   numeroDocumento: "",
   nombres: "",
   apellidos: "",
+  departamento: "",
+  municipio: "",
   fechaNacimiento: "",
   estado: "HABILITADO",
   causalEstado: "",
@@ -103,20 +113,6 @@ function formatearFecha(fechaIso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(fecha)
-}
-
-function mapearRegistro(registro: RegistroCensoRespuesta): RegistroCenso {
-  return {
-    id: registro.id,
-    cedula: registro.numeroDocumento,
-    nombreCompleto: `${registro.nombres} ${registro.apellidos}`.trim(),
-    estado: registro.estado,
-    ultimaModificacion: formatearFecha(registro.fechaActualizacion),
-    tipoDocumento: registro.tipoDocumento,
-    causalEstado: registro.causalEstado,
-    observacion: registro.observacion,
-    actorUltimaModificacion: registro.actorUltimaModificacion,
-  }
 }
 
 function BadgeEstado({ estado }: { estado: EstadoCenso }) {
@@ -166,111 +162,94 @@ function ModalBase({
   )
 }
 
-function obtenerResumen(registros: RegistroCenso[]) {
-  const total = registros.length
-  const habilitados = registros.filter((registro) => registro.estado === "HABILITADO").length
-  const excluidos = registros.filter((registro) => registro.estado === "EXCLUIDO").length
-  const exentos = registros.filter((registro) => registro.estado === "EXENTO").length
-
-  return { total, habilitados, excluidos, exentos }
-}
-
 export default function GestionCenso() {
+  const queryClient = useQueryClient()
   const [busqueda, setBusqueda] = useState("")
   const [filtroActivo, setFiltroActivo] = useState<FiltroActivo>("TODOS")
   const [paginaActual, setPaginaActual] = useState(1)
   const [mostrarToast, setMostrarToast] = useState(false)
   const [mensajeToast, setMensajeToast] = useState("La edición de registros estará disponible próximamente.")
-  const [registros, setRegistros] = useState<RegistroCenso[]>([])
   const [elecciones, setElecciones] = useState<EleccionResumen[]>([])
   const [eleccionActivaId, setEleccionActivaId] = useState<number | null>(null)
-  const [cargando, setCargando] = useState(true)
   const [procesando, setProcesando] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [modalActivo, setModalActivo] = useState<ModalActivo>("NINGUNO")
+  const [documentosCandidatos, setDocumentosCandidatos] = useState<Set<string>>(new Set())
   const [archivoCsv, setArchivoCsv] = useState<File | null>(null)
   const [registroEditando, setRegistroEditando] = useState<RegistroCenso | null>(null)
   const [formularioEditar, setFormularioEditar] = useState<FormularioEditar>(FORMULARIO_EDITAR_INICIAL)
   const [formularioManual, setFormularioManual] = useState<FormularioManual>(FORMULARIO_INICIAL)
   const [causalesEleccion, setCausalesEleccion] = useState<CausalesEleccion>(CAUSALES_DEFECTO)
 
-  useEffect(() => {
-    async function cargarElecciones() {
-      setCargando(true)
-      setError(null)
-
-      try {
-        const eleccionesCargadas = await listarElecciones()
-        setElecciones(eleccionesCargadas)
-
-        if (eleccionesCargadas.length === 0) {
-          setError("No hay elecciones configuradas. Debes crear una elección antes de administrar el censo.")
-          setRegistros([])
-          setEleccionActivaId(null)
-          return
-        }
-
-        const primeraEleccionId = eleccionesCargadas[0].id
-        setEleccionActivaId(primeraEleccionId)
-      } catch (errorCargando) {
-        setError(errorCargando instanceof Error ? errorCargando.message : "No fue posible cargar las elecciones")
-      } finally {
-        setCargando(false)
-      }
-    }
-
-    void cargarElecciones()
-  }, [])
-
-  useEffect(() => {
-    if (!eleccionActivaId) return
-
-    const eleccionId = eleccionActivaId
-
-    async function cargarRegistros() {
-      setCargando(true)
-      setError(null)
-
-      try {
-        const registrosCargados = await listarRegistrosCenso(eleccionId)
-        setRegistros(registrosCargados.map(mapearRegistro))
-      } catch (errorCargando) {
-        setError(errorCargando instanceof Error ? errorCargando.message : "No fue posible cargar los registros del censo")
-        setRegistros([])
-      } finally {
-        setCargando(false)
-      }
-    }
-
-    void cargarRegistros()
-  }, [eleccionActivaId])
-
-  useEffect(() => {
-    if (!eleccionActivaId) return
-    const eleccionId = eleccionActivaId
-
-    obtenerCausalesEleccion(eleccionId)
-      .then((causales) => setCausalesEleccion(causales))
-      .catch(() => setCausalesEleccion(CAUSALES_DEFECTO))
-  }, [eleccionActivaId])
-
-  const registrosFiltrados = registros.filter((r) => {
-    const coincideBusqueda =
-      busqueda.trim() === "" ||
-      r.cedula.replace(/\./g, "").includes(busqueda.replace(/\./g, "")) ||
-      r.nombreCompleto.toLowerCase().includes(busqueda.toLowerCase())
-
-    const coincideFiltro = filtroActivo === "TODOS" || r.estado === filtroActivo
-
-    return coincideBusqueda && coincideFiltro
+  const { data: eleccionesData } = useQuery({
+    queryKey: ["elecciones"],
+    queryFn: listarElecciones,
   })
 
-  const totalPaginas = Math.max(1, Math.ceil(registrosFiltrados.length / REGISTROS_POR_PAGINA))
+  useEffect(() => {
+    if (eleccionesData) {
+      setElecciones(eleccionesData)
+      if (eleccionesData.length > 0 && !eleccionActivaId) {
+        setEleccionActivaId(eleccionesData[0].id)
+      }
+    }
+  }, [eleccionesData])
+
+  useEffect(() => {
+    if (eleccionesData?.length === 0) {
+      setError("No hay elecciones configuradas. Debes crear una elección antes de administrar el censo.")
+    }
+  }, [eleccionesData])
+
+  const estadoFiltro = filtroActivo === "TODOS" ? null : filtroActivo
+
+  const { data: paginaData, isLoading: cargandoRegistros, refetch: refetchRegistros } = useQuery({
+    queryKey: ["censo-registros", eleccionActivaId, estadoFiltro, busqueda, paginaActual],
+    queryFn: () => listarRegistrosCenso(eleccionActivaId!, estadoFiltro, busqueda || null, paginaActual - 1, REGISTROS_POR_PAGINA),
+    enabled: !!eleccionActivaId,
+  })
+
+  const { data: resumenData } = useQuery({
+    queryKey: ["censo-resumen", eleccionActivaId],
+    queryFn: () => obtenerResumenCenso(eleccionActivaId!),
+    enabled: !!eleccionActivaId,
+  })
+
+  const { data: causalesData } = useQuery({
+    queryKey: ["censo-causales", eleccionActivaId],
+    queryFn: () => obtenerCausalesEleccion(eleccionActivaId!),
+    enabled: !!eleccionActivaId,
+  })
+
+  useEffect(() => {
+    if (causalesData) setCausalesEleccion(causalesData)
+  }, [causalesData])
+
+  useEffect(() => {
+    if (eleccionActivaId) {
+      listarDocumentosCandidaturas(eleccionActivaId)
+        .then((docs) => setDocumentosCandidatos(new Set(docs)))
+        .catch(() => setDocumentosCandidatos(new Set()))
+    }
+  }, [eleccionActivaId])
+
+  const registros: RegistroCenso[] = (paginaData?.contenido ?? []).map((r: RegistroCensoRespuesta) => ({
+    id: r.id,
+    cedula: r.numeroDocumento,
+    nombreCompleto: `${r.nombres} ${r.apellidos}`.trim(),
+    departamento: r.departamento,
+    municipio: r.municipio,
+    estado: r.estado,
+    ultimaModificacion: formatearFecha(r.fechaActualizacion),
+    tipoDocumento: r.tipoDocumento,
+    causalEstado: r.causalEstado,
+    observacion: r.observacion,
+    actorUltimaModificacion: r.actorUltimaModificacion,
+  }))
+
+  const totalElementos = paginaData?.totalElementos ?? 0
+  const totalPaginas = Math.max(1, Math.ceil(totalElementos / REGISTROS_POR_PAGINA))
   const paginaSegura = Math.min(paginaActual, totalPaginas)
-  const registrosPagina = registrosFiltrados.slice(
-    (paginaSegura - 1) * REGISTROS_POR_PAGINA,
-    paginaSegura * REGISTROS_POR_PAGINA
-  )
 
   function cambiarFiltro(filtro: FiltroActivo) {
     setFiltroActivo(filtro)
@@ -300,6 +279,15 @@ export default function GestionCenso() {
     setModalActivo("EDITAR")
   }
 
+  const registroMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: number; payload: { estado: EstadoCenso; causalEstado: CausalCenso | null; observacion: string } }) =>
+      actualizarRegistroCenso(id, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["censo-registros", eleccionActivaId] })
+      queryClient.invalidateQueries({ queryKey: ["censo-resumen", eleccionActivaId] })
+    },
+  })
+
   async function manejarGuardarEdicion() {
     if (!registroEditando) return
     if (formularioEditar.estado !== "HABILITADO" && !formularioEditar.causalEstado) {
@@ -309,25 +297,14 @@ export default function GestionCenso() {
     setProcesando(true)
     setError(null)
     try {
-      const actualizado = await actualizarRegistroCenso(registroEditando.id, {
-        estado: formularioEditar.estado,
-        causalEstado: formularioEditar.causalEstado || null,
-        observacion: formularioEditar.observacion,
+      await registroMutation.mutateAsync({
+        id: registroEditando.id,
+        payload: {
+          estado: formularioEditar.estado,
+          causalEstado: formularioEditar.causalEstado || null,
+          observacion: formularioEditar.observacion,
+        },
       })
-      setRegistros((prev) =>
-        prev.map((r) =>
-          r.id === registroEditando.id
-            ? {
-                ...r,
-                estado: actualizado.estado,
-                causalEstado: actualizado.causalEstado ?? null,
-                observacion: actualizado.observacion ?? null,
-                ultimaModificacion: formatearFecha(actualizado.fechaActualizacion),
-                actorUltimaModificacion: actualizado.actorUltimaModificacion,
-              }
-            : r
-        )
-      )
       cerrarModal()
       abrirToast("Registro actualizado correctamente")
     } catch (err) {
@@ -337,31 +314,18 @@ export default function GestionCenso() {
     }
   }
 
-  async function recargarRegistros(): Promise<boolean> {
-    if (!eleccionActivaId) return false
-
-    const eleccionId = eleccionActivaId
-
-    setCargando(true)
-    setError(null)
-
-    try {
-      const registrosCargados = await listarRegistrosCenso(eleccionId)
-      setRegistros(registrosCargados.map(mapearRegistro))
-      return true
-    } catch (errorCarga) {
-      setError(errorCarga instanceof Error ? errorCarga.message : "No fue posible sincronizar el censo")
-      return false
-    } finally {
-      setCargando(false)
-    }
-  }
+  const importMutation = useMutation({
+    mutationFn: ({ eleccionId, archivo }: { eleccionId: number; archivo: File }) =>
+      importarCensoCsv(eleccionId, archivo),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["censo-registros", eleccionActivaId] })
+      queryClient.invalidateQueries({ queryKey: ["censo-resumen", eleccionActivaId] })
+    },
+  })
 
   async function manejarActualizarCenso() {
-    const actualizado = await recargarRegistros()
-    if (actualizado) {
-      abrirToast("Censo actualizado desde gestion_pre_electoral.registros_censo")
-    }
+    await refetchRegistros()
+    abrirToast("Censo sincronizado desde la base de datos")
   }
 
   async function manejarImportacionCsv() {
@@ -374,8 +338,8 @@ export default function GestionCenso() {
     setError(null)
 
     try {
-      const mensaje = await importarCensoCsv(eleccionActivaId, archivoCsv)
-      await recargarRegistros()
+      const mensaje = await importMutation.mutateAsync({ eleccionId: eleccionActivaId, archivo: archivoCsv })
+      await refetchRegistros()
       cerrarModal()
       abrirToast(mensaje)
     } catch (errorImportando) {
@@ -384,6 +348,14 @@ export default function GestionCenso() {
       setProcesando(false)
     }
   }
+
+  const registroManualMutation = useMutation({
+    mutationFn: (payload: Parameters<typeof registrarCiudadanoCenso>[0]) => registrarCiudadanoCenso(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["censo-registros", eleccionActivaId] })
+      queryClient.invalidateQueries({ queryKey: ["censo-resumen", eleccionActivaId] })
+    },
+  })
 
   async function manejarRegistroManual() {
     if (!eleccionActivaId) {
@@ -409,18 +381,20 @@ export default function GestionCenso() {
     setError(null)
 
     try {
-      await registrarCiudadanoCenso({
+      await registroManualMutation.mutateAsync({
         eleccionId: eleccionActivaId,
         tipoDocumento: formularioManual.tipoDocumento,
         numeroDocumento: formularioManual.numeroDocumento.trim(),
         nombres: formularioManual.nombres.trim(),
         apellidos: formularioManual.apellidos.trim(),
         fechaNacimiento: formularioManual.fechaNacimiento || null,
+        departamento: formularioManual.departamento.trim() || null,
+        municipio: formularioManual.municipio.trim() || null,
         estado: formularioManual.estado,
         causalEstado: formularioManual.estado === "HABILITADO" ? null : (formularioManual.causalEstado as CausalCenso),
         observacion: formularioManual.observacion.trim(),
       })
-      await recargarRegistros()
+      await refetchRegistros()
       cerrarModal()
       abrirToast("Registro manual de censo completado")
     } catch (errorRegistrando) {
@@ -430,7 +404,7 @@ export default function GestionCenso() {
     }
   }
 
-  const resumen = obtenerResumen(registros)
+  const resumen: ResumenCenso = resumenData ?? { total: 0, habilitados: 0, excluidos: 0, exentos: 0 }
   const porcentajeHabilitados = resumen.total === 0 ? 0 : Math.round((resumen.habilitados / resumen.total) * 100)
   const causalesDisponibles: CausalItem[] =
     formularioManual.estado === "HABILITADO"
@@ -552,7 +526,13 @@ export default function GestionCenso() {
                       Nombre Completo
                     </th>
                     <th className="text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wide pb-2 pr-4">
+                      Depto/Municipio
+                    </th>
+                    <th className="text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wide pb-2 pr-4">
                       Estado de<br />Censo
+                    </th>
+                    <th className="text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wide pb-2 pr-4">
+                      Participación
                     </th>
                     <th className="text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wide pb-2 pr-4">
                       Última<br />Modificación
@@ -563,15 +543,15 @@ export default function GestionCenso() {
                   </tr>
                 </thead>
                 <tbody>
-                  {cargando && (
+                  {cargandoRegistros && (
                     <tr>
-                      <td colSpan={5} className="py-10 text-center text-sm text-gray-400">
+                      <td colSpan={7} className="py-10 text-center text-sm text-gray-400">
                         Cargando registros de censo...
                       </td>
                     </tr>
                   )}
 
-                  {!cargando && registrosPagina.map((registro) => (
+                  {!cargandoRegistros && registros.map((registro: RegistroCenso) => (
                     <tr key={registro.cedula} className="border-b last:border-0 hover:bg-gray-50 transition">
                       <td className="py-3.5 pr-4 font-mono text-sm text-gray-700">
                         <div className="notranslate" translate="no">{registro.cedula}</div>
@@ -583,10 +563,24 @@ export default function GestionCenso() {
                           <div className="mt-1 text-xs font-normal text-gray-400">{registro.observacion}</div>
                         )}
                       </td>
+                      <td className="py-3.5 pr-4 text-sm text-gray-600">
+                        {registro.departamento && registro.municipio
+                          ? `${registro.departamento} / ${registro.municipio}`
+                          : registro.departamento ?? registro.municipio ?? "—"}
+                      </td>
                       <td className="py-3.5 pr-4">
                         <BadgeEstado estado={registro.estado} />
                         {registro.causalEstado && (
                           <div className="mt-1 text-xs text-gray-400">{registro.causalEstado.replaceAll("_", " ")}</div>
+                        )}
+                      </td>
+                      <td className="py-3.5 pr-4">
+                        {documentosCandidatos.has(registro.cedula) ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 border border-purple-200">
+                            Candidato
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-300">—</span>
                         )}
                       </td>
                       <td className="py-3.5 pr-4 text-sm text-gray-500">
@@ -607,9 +601,9 @@ export default function GestionCenso() {
                     </tr>
                   ))}
 
-                  {!cargando && registrosPagina.length === 0 && (
+                  {!cargandoRegistros && registros.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="py-10 text-center text-sm text-gray-400">
+                      <td colSpan={7} className="py-10 text-center text-sm text-gray-400">
                         No se encontraron registros.
                       </td>
                     </tr>
@@ -620,9 +614,9 @@ export default function GestionCenso() {
               {/* Paginación */}
               <div className="flex items-center justify-between mt-5 pt-4 border-t">
                 <p className="text-xs text-gray-400">
-                  {registrosFiltrados.length === 0
+                  {totalElementos === 0
                     ? "Sin resultados para mostrar"
-                    : `Mostrando ${(paginaSegura - 1) * REGISTROS_POR_PAGINA + 1}–${Math.min(paginaSegura * REGISTROS_POR_PAGINA, registrosFiltrados.length)} de ${registrosFiltrados.length.toLocaleString("es-CO")} registros`}
+                    : `Mostrando ${(paginaSegura - 1) * REGISTROS_POR_PAGINA + 1}–${Math.min(paginaSegura * REGISTROS_POR_PAGINA, totalElementos)} de ${totalElementos.toLocaleString("es-CO")} registros`}
                 </p>
                 <div className="flex items-center gap-1">
                   <button
@@ -745,6 +739,7 @@ export default function GestionCenso() {
               />
               <span className="font-medium text-gray-700">{archivoCsv ? archivoCsv.name : "Seleccionar archivo CSV"}</span>
               <span className="mt-1 block text-xs text-gray-400">Máximo 10MB. Usa UTF-8 y encabezados válidos.</span>
+              <span className="mt-1 block text-xs text-gray-400">Columnas opcionales: <code className="bg-gray-100 px-1 rounded">departamento</code> y <code className="bg-gray-100 px-1 rounded">municipio</code>.</span>
             </label>
 
             <div className="flex justify-end gap-3">
@@ -780,7 +775,7 @@ export default function GestionCenso() {
                   setFormularioEditar((f) => ({
                     ...f,
                     estado,
-                    causalEstado: estado === "HABILITADO" ? "" : f.causalEstado,
+                    causalEstado: "",
                   }))
                 }}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
@@ -899,6 +894,26 @@ export default function GestionCenso() {
             </div>
 
             <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Departamento</label>
+              <input
+                type="text"
+                value={formularioManual.departamento}
+                onChange={(event) => setFormularioManual((actual) => ({ ...actual, departamento: event.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Municipio</label>
+              <input
+                type="text"
+                value={formularioManual.municipio}
+                onChange={(event) => setFormularioManual((actual) => ({ ...actual, municipio: event.target.value }))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+              />
+            </div>
+
+            <div>
               <label className="mb-1 block text-xs font-medium text-gray-600">Fecha de nacimiento</label>
               <input
                 type="date"
@@ -917,7 +932,7 @@ export default function GestionCenso() {
                   setFormularioManual((actual) => ({
                     ...actual,
                     estado,
-                    causalEstado: estado === "HABILITADO" ? "" : actual.causalEstado,
+                    causalEstado: "",
                   }))
                 }}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"

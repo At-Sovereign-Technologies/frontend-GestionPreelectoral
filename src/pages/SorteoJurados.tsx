@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   Dices,
   CircleAlert,
@@ -8,6 +8,8 @@ import {
   MapPin,
   Hash,
   RefreshCw,
+  List,
+  Search,
 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import PageHeader from "../components/PageHeader"
@@ -17,13 +19,16 @@ import {
   realizarSorteo,
   resetearMock,
   obtenerEstadoMock,
+  listarEleccionesJurados,
+  listarJuradosPorEleccion,
   type SorteoResultado,
   type Jurado,
   type MockState,
+  type EleccionResumen,
 } from "../api/juradosApi"
 
 interface FormularioSorteo {
-  eleccionId: string
+  eleccionId: number
   departamento: string
   municipio: string
   numeroMesas: number
@@ -32,7 +37,7 @@ interface FormularioSorteo {
 }
 
 const FORMULARIO_INICIAL: FormularioSorteo = {
-  eleccionId: "1",
+  eleccionId: 1,
   departamento: "Cundinamarca",
   municipio: "Bogota",
   numeroMesas: 3,
@@ -80,10 +85,16 @@ export default function SorteoJurados() {
   const [resultado, setResultado] = useState<SorteoResultado | null>(null)
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [mostrarToast, setMostrarToast] = useState(false)
   const [mensajeToast, setMensajeToast] = useState("")
   const [mesaExpandida, setMesaExpandida] = useState<string | null>(null)
   const [estadoMock, setEstadoMock] = useState<MockState | null>(null)
+  const [elecciones, setElecciones] = useState<EleccionResumen[]>([])
+  const [eleccionFiltro, setEleccionFiltro] = useState<number | null>(null)
+  const [juradosFiltrados, setJuradosFiltrados] = useState<Jurado[]>([])
+  const [cargandoJurados, setCargandoJurados] = useState(false)
+  const [mostrarListaJurados, setMostrarListaJurados] = useState(false)
 
   function abrirToast(mensaje: string) {
     setMensajeToast(mensaje)
@@ -99,7 +110,48 @@ export default function SorteoJurados() {
     }
   }
 
+  useEffect(() => {
+    listarEleccionesJurados()
+      .then(setElecciones)
+      .catch(() => setElecciones([]))
+  }, [])
+
+  async function cargarJuradosPorEleccion() {
+    if (!eleccionFiltro) return
+    setCargandoJurados(true)
+    try {
+      const jurados = await listarJuradosPorEleccion(eleccionFiltro)
+      setJuradosFiltrados(jurados)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cargar jurados")
+    } finally {
+      setCargandoJurados(false)
+    }
+  }
+
+  function validarFormulario(): boolean {
+    const errores: Record<string, string> = {}
+    if (!formulario.eleccionId || Number(formulario.eleccionId) <= 0) {
+      errores.eleccionId = "Debes seleccionar una elección"
+    }
+    if (!formulario.departamento.trim()) {
+      errores.departamento = "Departamento es obligatorio"
+    }
+    if (!formulario.municipio.trim()) {
+      errores.municipio = "Municipio es obligatorio"
+    }
+    if (formulario.numeroMesas < 1) {
+      errores.numeroMesas = "Debe ser mayor o igual a 1"
+    }
+    if (formulario.juradosPorMesa < 1) {
+      errores.juradosPorMesa = "Debe ser mayor o igual a 1"
+    }
+    setFormErrors(errores)
+    return Object.keys(errores).length === 0
+  }
+
   async function manejarSorteo() {
+    if (!validarFormulario()) return
     setCargando(true)
     setError(null)
     try {
@@ -122,6 +174,7 @@ export default function SorteoJurados() {
   async function manejarReset() {
     setCargando(true)
     setError(null)
+    setFormErrors({})
     try {
       await resetearMock()
       setResultado(null)
@@ -204,30 +257,48 @@ export default function SorteoJurados() {
               <div className="grid gap-4 sm:grid-cols-3">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-gray-600">ID Elección</label>
-                  <input
-                    type="text"
+                  <select
                     value={formulario.eleccionId}
-                    onChange={(e) => setFormulario((f) => ({ ...f, eleccionId: e.target.value }))}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
-                  />
+                    onChange={(e) => {
+                      setFormulario((f) => ({ ...f, eleccionId: Number(e.target.value) }))
+                      setFormErrors((errs) => { const { eleccionId, ...rest } = errs; return rest })
+                    }}
+                    className="notranslate w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+                    translate="no"
+                  >
+                    {elecciones.map((el) => (
+                      <option key={el.id} value={el.id}>
+                        {el.nombreOficial} ({el.estado})
+                      </option>
+                    ))}
+                  </select>
+                  {formErrors.eleccionId && <p className="mt-1 text-xs text-red-600">{formErrors.eleccionId}</p>}
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-gray-600">Departamento</label>
                   <input
                     type="text"
                     value={formulario.departamento}
-                    onChange={(e) => setFormulario((f) => ({ ...f, departamento: e.target.value }))}
+                    onChange={(e) => {
+                      setFormulario((f) => ({ ...f, departamento: e.target.value }))
+                      setFormErrors((errs) => { const { departamento, ...rest } = errs; return rest })
+                    }}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
                   />
+                  {formErrors.departamento && <p className="mt-1 text-xs text-red-600">{formErrors.departamento}</p>}
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-gray-600">Municipio</label>
                   <input
                     type="text"
                     value={formulario.municipio}
-                    onChange={(e) => setFormulario((f) => ({ ...f, municipio: e.target.value }))}
+                    onChange={(e) => {
+                      setFormulario((f) => ({ ...f, municipio: e.target.value }))
+                      setFormErrors((errs) => { const { municipio, ...rest } = errs; return rest })
+                    }}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
                   />
+                  {formErrors.municipio && <p className="mt-1 text-xs text-red-600">{formErrors.municipio}</p>}
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-gray-600">Número de mesas</label>
@@ -235,9 +306,13 @@ export default function SorteoJurados() {
                     type="number"
                     min={1}
                     value={formulario.numeroMesas}
-                    onChange={(e) => setFormulario((f) => ({ ...f, numeroMesas: Number(e.target.value) }))}
+                    onChange={(e) => {
+                      setFormulario((f) => ({ ...f, numeroMesas: Number(e.target.value) }))
+                      setFormErrors((errs) => { const { numeroMesas, ...rest } = errs; return rest })
+                    }}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
                   />
+                  {formErrors.numeroMesas && <p className="mt-1 text-xs text-red-600">{formErrors.numeroMesas}</p>}
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-gray-600">Jurados por mesa</label>
@@ -245,9 +320,13 @@ export default function SorteoJurados() {
                     type="number"
                     min={1}
                     value={formulario.juradosPorMesa}
-                    onChange={(e) => setFormulario((f) => ({ ...f, juradosPorMesa: Number(e.target.value) }))}
+                    onChange={(e) => {
+                      setFormulario((f) => ({ ...f, juradosPorMesa: Number(e.target.value) }))
+                      setFormErrors((errs) => { const { juradosPorMesa, ...rest } = errs; return rest })
+                    }}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
                   />
+                  {formErrors.juradosPorMesa && <p className="mt-1 text-xs text-red-600">{formErrors.juradosPorMesa}</p>}
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-gray-600">Semilla (seed)</label>
@@ -270,6 +349,88 @@ export default function SorteoJurados() {
                   {cargando ? "Ejecutando sorteo..." : "Realizar sorteo"}
                 </button>
               </div>
+            </div>
+
+            {/* ── Listado de jurados por elección ─────────────────────────── */}
+            <div className="bg-white border rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <List size={18} className="text-red-500" />
+                  Jurados por Elección
+                </h2>
+              </div>
+              <div className="flex items-center gap-3 mb-4">
+                <select
+                  value={eleccionFiltro ?? ""}
+                  onChange={(e) => {
+                    const val = e.target.value ? Number(e.target.value) : null
+                    setEleccionFiltro(val)
+                  }}
+                  className="notranslate rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+                  translate="no"
+                >
+                  <option value="">Selecciona una elección...</option>
+                  {elecciones.map((el) => (
+                    <option key={el.id} value={el.id}>
+                      {el.nombreOficial} ({el.estado})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => { void cargarJuradosPorEleccion(); setMostrarListaJurados(true) }}
+                  disabled={!eleccionFiltro || cargandoJurados}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-red-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:bg-red-300"
+                >
+                  <Search size={14} />
+                  Filtrar
+                </button>
+              </div>
+
+              {mostrarListaJurados && (
+                <>
+                  {cargandoJurados && (
+                    <p className="text-sm text-gray-400 py-4">Cargando jurados...</p>
+                  )}
+                  {!cargandoJurados && juradosFiltrados.length === 0 && (
+                    <p className="text-sm text-gray-400 py-4">No hay jurados asignados para esta elección.</p>
+                  )}
+                  {!cargandoJurados && juradosFiltrados.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wide pb-2 pr-4">Cédula</th>
+                            <th className="text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wide pb-2 pr-4">Nombre</th>
+                            <th className="text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wide pb-2 pr-4">Rol</th>
+                            <th className="text-left text-[11px] font-semibold text-gray-400 uppercase tracking-wide pb-2">Estado</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {juradosFiltrados.map((jurado) => (
+                            <tr key={jurado.id} className="border-b last:border-0 hover:bg-gray-50 transition">
+                              <td className="py-2.5 pr-4 font-mono text-sm text-gray-700">
+                                <div className="notranslate" translate="no">{jurado.cedula}</div>
+                              </td>
+                              <td className="py-2.5 pr-4 text-gray-900 font-medium">
+                                {jurado.nombre} {jurado.apellido}
+                              </td>
+                              <td className="py-2.5 pr-4">
+                                <BadgeRol rol={jurado.rol as Jurado["rol"]} />
+                              </td>
+                              <td className="py-2.5">
+                                <BadgeEstado estado={jurado.estado as Jurado["estado"]} />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <p className="mt-2 text-xs text-gray-400">
+                        Mostrando {juradosFiltrados.length} jurado(s)
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
 
             {/* Resultados del sorteo */}

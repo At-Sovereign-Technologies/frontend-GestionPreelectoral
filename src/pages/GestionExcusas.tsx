@@ -111,6 +111,7 @@ export default function GestionExcusas() {
   const [documentoSoporte, setDocumentoSoporte] = useState("")
   const [resolucion, setResolucion] = useState<"APROBADA" | "RECHAZADA">("APROBADA")
   const [motivoRechazo, setMotivoRechazo] = useState("")
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
   function abrirToast(mensaje: string) {
     setMensajeToast(mensaje)
@@ -150,6 +151,7 @@ export default function GestionExcusas() {
     setJuradoSeleccionado(jurado)
     setMotivoExcusa("")
     setDocumentoSoporte("")
+    setFormErrors({})
     setModalActivo("EXCUSA")
   }
 
@@ -167,14 +169,22 @@ export default function GestionExcusas() {
     setMotivoExcusa("")
     setDocumentoSoporte("")
     setMotivoRechazo("")
+    setFormErrors({})
   }
 
   async function manejarPresentarExcusa() {
-    if (!juradoSeleccionado) return
+    const errores: Record<string, string> = {}
+    if (!juradoSeleccionado) {
+      errores.juradoId = "Debe seleccionar un jurado"
+    }
     if (!motivoExcusa.trim()) {
-      setError("El motivo de la excusa es obligatorio")
+      errores.motivo = "El motivo de la excusa es obligatorio"
+    }
+    if (Object.keys(errores).length > 0) {
+      setFormErrors(errores)
       return
     }
+    if (!juradoSeleccionado) return
     setProcesando(true)
     setError(null)
     try {
@@ -521,15 +531,22 @@ export default function GestionExcusas() {
           onClose={cerrarModal}
         >
           <div className="space-y-4">
+            {formErrors.juradoId && (
+              <p className="text-xs text-red-600">{formErrors.juradoId}</p>
+            )}
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-600">Motivo de la excusa</label>
               <textarea
                 value={motivoExcusa}
-                onChange={(e) => setMotivoExcusa(e.target.value)}
+                onChange={(e) => {
+                  setMotivoExcusa(e.target.value)
+                  setFormErrors((errs) => { const { motivo, ...rest } = errs; return rest })
+                }}
                 rows={3}
                 placeholder="Ej: Enfermedad comprobada, viaje programado..."
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
               />
+              {formErrors.motivo && <p className="mt-1 text-xs text-red-600">{formErrors.motivo}</p>}
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-600">Documento de soporte (opcional)</label>

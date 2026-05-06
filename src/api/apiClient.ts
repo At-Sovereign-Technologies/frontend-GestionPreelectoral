@@ -40,6 +40,10 @@ export async function getErrorMessage(
       return body.message
     }
 
+    if (typeof body.error === "string" && body.error.trim()) {
+      return body.error
+    }
+
     if (errors && typeof errors === "object") {
       const details = Object.entries(errors as Record<string, unknown>)
         .map(([field, value]) => `${field}: ${String(value)}`)

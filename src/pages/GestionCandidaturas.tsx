@@ -8,7 +8,6 @@ import {
   Ticket,
   ArrowRightLeft,
   UserPlus,
-  Eye,
   Printer,
 } from "lucide-react"
 import PageHeader from "../components/PageHeader"
@@ -19,13 +18,15 @@ import {
   registrarCandidatura,
   transicionarEstado,
   generarTarjeton,
-  obtenerUltimoTarjeton,
+  subirFotoCandidatura,
   listarVersiones,
   type CandidaturaRespuesta,
   type CandidaturaVersion,
   type EstadoCandidatura,
   type TarjetonRespuesta,
 } from "../api/candidaturasApi"
+import { listarElecciones, type EleccionResumen } from "../api/censoApi"
+import { buildGatewayUrl } from "../api/apiClient"
 
 const ESTADOS_TRANSICION: Record<EstadoCandidatura, EstadoCandidatura[]> = {
   BORRADOR: ["POSTULADO", "RECHAZADO"],
@@ -118,6 +119,7 @@ function ModalBase({
 export default function GestionCandidaturas() {
   const [busqueda, setBusqueda] = useState("")
   const [eleccionId, setEleccionId] = useState<number>(1)
+  const [elecciones, setElecciones] = useState<EleccionResumen[]>([])
   const [candidaturas, setCandidaturas] = useState<CandidaturaRespuesta[]>([])
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -140,7 +142,36 @@ export default function GestionCandidaturas() {
     partido: "",
     circunscripcion: "NACIONAL",
     fotoUrl: "",
+    foto: null as File | null,
   })
+  const [fotoPreview, setFotoPreview] = useState<string | null>(null)
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+
+  function validarFormulario(): boolean {
+    const errores: Record<string, string> = {}
+    if (!formRegistro.nombreCandidato.trim()) {
+      errores.nombreCandidato = "El nombre del candidato es obligatorio"
+    } else if (formRegistro.nombreCandidato.trim().length > 180) {
+      errores.nombreCandidato = "Máximo 180 caracteres"
+    }
+    if (!formRegistro.documento.trim()) {
+      errores.documento = "El documento es obligatorio"
+    } else if (formRegistro.documento.trim().length > 30) {
+      errores.documento = "Máximo 30 caracteres"
+    }
+    if (!formRegistro.partido.trim()) {
+      errores.partido = "El partido es obligatorio"
+    } else if (formRegistro.partido.trim().length > 120) {
+      errores.partido = "Máximo 120 caracteres"
+    }
+    if (!formRegistro.circunscripcion.trim()) {
+      errores.circunscripcion = "La circunscripción es obligatoria"
+    } else if (formRegistro.circunscripcion.trim().length > 120) {
+      errores.circunscripcion = "Máximo 120 caracteres"
+    }
+    setFormErrors(errores)
+    return Object.keys(errores).length === 0
+  }
 
   async function cargarCandidaturas() {
     setCargando(true)
@@ -160,6 +191,18 @@ export default function GestionCandidaturas() {
     void cargarCandidaturas()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eleccionId])
+
+  useEffect(() => {
+    listarElecciones()
+      .then((data) => {
+        setElecciones(data)
+        if (data.length > 0 && !data.find((e) => e.id === eleccionId)) {
+          setEleccionId(data[0].id)
+        }
+      })
+      .catch(() => setElecciones([]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const candidaturasFiltradas = candidaturas.filter((c) => {
     const q = busqueda.trim().toLowerCase()
@@ -182,6 +225,9 @@ export default function GestionCandidaturas() {
     setTarjeton(null)
     setVersiones([])
     setJustificacion("")
+    setFormErrors({})
+    if (fotoPreview) URL.revokeObjectURL(fotoPreview)
+    setFotoPreview(null)
   }
 
   async function handleTransicionar() {
@@ -220,19 +266,6 @@ export default function GestionCandidaturas() {
     }
   }
 
-  async function handleVerUltimoTarjeton() {
-    setProcesando(true)
-    try {
-      const data = await obtenerUltimoTarjeton(eleccionId)
-      setTarjeton(data)
-      setModalActivo("TARJETON")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al obtener el último tarjetón")
-    } finally {
-      setProcesando(false)
-    }
-  }
-
   async function handleVerVersiones(candidatura: CandidaturaRespuesta) {
     setCargando(true)
     try {
@@ -248,9 +281,10 @@ export default function GestionCandidaturas() {
   }
 
   async function handleRegistrar() {
+    if (!validarFormulario()) return
     setProcesando(true)
     try {
-      await registrarCandidatura({
+      const candidaturaCreada = await registrarCandidatura({
         eleccionId,
         nombreCandidato: formRegistro.nombreCandidato,
         documento: formRegistro.documento,
@@ -259,8 +293,13 @@ export default function GestionCandidaturas() {
         fotoUrl: formRegistro.fotoUrl || null,
         actor,
       })
+      if (formRegistro.foto) {
+        await subirFotoCandidatura(candidaturaCreada.id, formRegistro.foto)
+      }
       abrirToast("Candidatura registrada")
-      setFormRegistro({ nombreCandidato: "", documento: "", partido: "", circunscripcion: "NACIONAL", fotoUrl: "" })
+      setFormRegistro({ nombreCandidato: "", documento: "", partido: "", circunscripcion: "NACIONAL", fotoUrl: "", foto: null })
+      if (fotoPreview) URL.revokeObjectURL(fotoPreview)
+      setFotoPreview(null)
       await cargarCandidaturas()
       cerrarModal()
     } catch (err) {
@@ -282,7 +321,7 @@ export default function GestionCandidaturas() {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setModalActivo("REGISTRAR")}
+              onClick={() => { setFormErrors({}); setFormRegistro((p) => ({ ...p, foto: null })); setFotoPreview(null); setModalActivo("REGISTRAR") }}
               className="inline-flex items-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600"
             >
               <Plus size={16} />
@@ -296,14 +335,7 @@ export default function GestionCandidaturas() {
               <Ticket size={16} />
               Generar tarjetón
             </button>
-            <button
-              onClick={handleVerUltimoTarjeton}
-              disabled={procesando}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
-            >
-              <Eye size={16} />
-              Ver último tarjetón
-            </button>
+            
           </div>
         </div>
 
@@ -315,13 +347,19 @@ export default function GestionCandidaturas() {
 
         <div className="mb-4 flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-gray-600">Elección ID:</label>
-            <input
-              type="number"
+            <label className="text-sm font-medium text-gray-600">Elección:</label>
+            <select
               value={eleccionId}
               onChange={(e) => setEleccionId(Number(e.target.value))}
-              className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
-            />
+              className="notranslate rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+              translate="no"
+            >
+              {elecciones.map((el) => (
+                <option key={el.id} value={el.id}>
+                  {el.nombreOficial} ({el.estado})
+                </option>
+              ))}
+            </select>
           </div>
           <div className="relative flex-1 max-w-md">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -548,12 +586,30 @@ export default function GestionCandidaturas() {
                       <div className="absolute left-0 top-0 h-full w-1.5" style={{ backgroundColor: colorPartido }} />
 
                       <div className="flex items-start gap-3 pl-2">
-                        {/* Logo / Avatar */}
-                        <div
-                          className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-sm border border-gray-300 text-lg font-black text-white shadow-sm"
-                          style={{ backgroundColor: colorPartido }}
-                        >
-                          {iniciales}
+                        {/* Foto / Avatar */}
+                        <div className="flex flex-col items-center gap-0.5 flex-shrink-0">
+                          {entrada.fotoUrl ? (
+                            <img
+                              src={buildGatewayUrl(entrada.fotoUrl)}
+                              alt={entrada.nombreCandidato}
+                              className="h-14 w-14 object-cover rounded-sm border border-gray-300"
+                              onError={(e) => {
+                                const img = e.currentTarget
+                                img.style.display = "none"
+                                const fallback = img.nextElementSibling as HTMLElement | null
+                                if (fallback) fallback.style.display = "flex"
+                              }}
+                            />
+                          ) : null}
+                          <div
+                            className="flex h-14 w-14 items-center justify-center rounded-sm border border-gray-300 text-lg font-black text-white shadow-sm"
+                            style={{ backgroundColor: colorPartido, display: entrada.fotoUrl ? "none" : "flex" }}
+                          >
+                            {iniciales}
+                          </div>
+                          {!entrada.fotoUrl && (
+                            <span className="text-[8px] font-semibold uppercase tracking-wider text-gray-400">Sin foto</span>
+                          )}
                         </div>
 
                         <div className="flex-1 min-w-0">
@@ -635,40 +691,87 @@ export default function GestionCandidaturas() {
         <ModalBase titulo="Registrar Candidatura" subtitulo="Complete los datos del nuevo candidato" onClose={cerrarModal}>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <label className="mb-1 block text-xs font-medium text-gray-600">Nombre candidato</label>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Nombre candidato <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 value={formRegistro.nombreCandidato}
-                onChange={(e) => setFormRegistro((p) => ({ ...p, nombreCandidato: e.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+                onChange={(e) => { setFormRegistro((p) => ({ ...p, nombreCandidato: e.target.value })); setFormErrors((prev) => { const { nombreCandidato, ...rest } = prev; return rest; }) }}
+                className={`w-full rounded-lg border ${formErrors.nombreCandidato ? "border-red-400" : "border-gray-300"} px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300`}
               />
+              {formErrors.nombreCandidato && <p className="mt-1 text-xs text-red-500">{formErrors.nombreCandidato}</p>}
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Documento</label>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Documento <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 value={formRegistro.documento}
-                onChange={(e) => setFormRegistro((p) => ({ ...p, documento: e.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+                onChange={(e) => { setFormRegistro((p) => ({ ...p, documento: e.target.value })); setFormErrors((prev) => { const { documento, ...rest } = prev; return rest; }) }}
+                className={`w-full rounded-lg border ${formErrors.documento ? "border-red-400" : "border-gray-300"} px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300`}
               />
+              {formErrors.documento && <p className="mt-1 text-xs text-red-500">{formErrors.documento}</p>}
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Partido</label>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Partido <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 value={formRegistro.partido}
-                onChange={(e) => setFormRegistro((p) => ({ ...p, partido: e.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+                onChange={(e) => { setFormRegistro((p) => ({ ...p, partido: e.target.value })); setFormErrors((prev) => { const { partido, ...rest } = prev; return rest; }) }}
+                className={`w-full rounded-lg border ${formErrors.partido ? "border-red-400" : "border-gray-300"} px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300`}
               />
+              {formErrors.partido && <p className="mt-1 text-xs text-red-500">{formErrors.partido}</p>}
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-600">Circunscripción</label>
               <input
                 type="text"
                 value={formRegistro.circunscripcion}
-                onChange={(e) => setFormRegistro((p) => ({ ...p, circunscripcion: e.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+                onChange={(e) => { setFormRegistro((p) => ({ ...p, circunscripcion: e.target.value })); setFormErrors((prev) => { const { circunscripcion, ...rest } = prev; return rest; }) }}
+                className={`w-full rounded-lg border ${formErrors.circunscripcion ? "border-red-400" : "border-gray-300"} px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-300`}
               />
+              {formErrors.circunscripcion && <p className="mt-1 text-xs text-red-500">{formErrors.circunscripcion}</p>}
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">Foto del candidato</label>
+              <div className="flex items-center gap-4">
+                {fotoPreview ? (
+                  <img src={fotoPreview} alt="Vista previa" className="h-16 w-16 rounded-lg object-cover border border-gray-200" />
+                ) : (
+                  <div className="flex h-16 w-16 items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 text-xs text-gray-400">
+                    Sin foto
+                  </div>
+                )}
+                <label className="cursor-pointer rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 transition hover:bg-gray-50">
+                  <span>Seleccionar archivo</span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null
+                      setFormRegistro((p) => ({ ...p, foto: file }))
+                      if (fotoPreview) URL.revokeObjectURL(fotoPreview)
+                      if (file) {
+                        setFotoPreview(URL.createObjectURL(file))
+                      } else {
+                        setFotoPreview(null)
+                      }
+                    }}
+                  />
+                </label>
+                {formRegistro.foto && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormRegistro((p) => ({ ...p, foto: null }))
+                      if (fotoPreview) URL.revokeObjectURL(fotoPreview)
+                      setFotoPreview(null)
+                    }}
+                    className="text-xs text-red-500 hover:text-red-700"
+                  >
+                    Eliminar
+                  </button>
+                )}
+              </div>
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-600">Actor</label>

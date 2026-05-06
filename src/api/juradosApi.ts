@@ -36,6 +36,7 @@ export interface Jurado {
   rol: RolJurado
   estado: EstadoJurado
   reemplazaA: string | null
+  eleccionId: number | null
   fechaCreacion: string
 }
 
@@ -46,7 +47,7 @@ export interface Mesa {
 }
 
 export interface SorteoResultado {
-  eleccionId: string
+  eleccionId: number
   departamento: string
   municipio: string
   seed: number
@@ -85,8 +86,14 @@ export interface MockState {
   timestamp: string
 }
 
+export interface EleccionResumen {
+  id: number
+  nombreOficial: string
+  estado: string
+}
+
 export interface SolicitudSorteo {
-  eleccionId: string
+  eleccionId: number
   departamento: string
   municipio: string
   numeroMesas: number
@@ -165,6 +172,22 @@ export async function consultarJuradoPorCedula(cedula: string): Promise<Jurado> 
     headers: createJsonHeaders(),
   })
   return procesarRespuesta<Jurado>(response, "No fue posible consultar el jurado por cédula")
+}
+
+export async function listarJuradosPorEleccion(eleccionId: number): Promise<Jurado[]> {
+  const response = await fetch(buildJuradosUrl(`/api/jurados/elecciones/${eleccionId}`), {
+    method: "GET",
+    headers: createJsonHeaders(),
+  })
+  return procesarRespuesta<Jurado[]>(response, "No fue posible listar los jurados de la elección")
+}
+
+export async function listarEleccionesJurados(): Promise<EleccionResumen[]> {
+  const response = await fetch(buildJuradosUrl("/api/jurados/elecciones"), {
+    method: "GET",
+    headers: createJsonHeaders(),
+  })
+  return procesarRespuesta<EleccionResumen[]>(response, "No fue posible listar las elecciones")
 }
 
 /* ── Endpoints debug / mock ────────────────────────────────────────────── */

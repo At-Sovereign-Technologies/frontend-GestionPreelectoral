@@ -1,6 +1,11 @@
 import { buildGatewayUrl, createJsonHeaders, getErrorMessage } from "./apiClient"
 import { getToken } from "../services/authService"
 
+function createHeadersWithAuth(): HeadersInit {
+  const token = getToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 export type EstadoCandidatura =
   | "BORRADOR"
   | "POSTULADO"
@@ -102,6 +107,13 @@ export async function listarCandidaturasPorEleccion(eleccionId: number): Promise
   return procesarRespuesta<CandidaturaRespuesta[]>(response, "No fue posible listar las candidaturas")
 }
 
+export async function listarDocumentosCandidaturas(eleccionId: number): Promise<string[]> {
+  const response = await fetch(buildGatewayUrl(`${CANDIDATURAS_BASE}/elecciones/${eleccionId}/documentos`), {
+    headers: createJsonHeaders(getToken()),
+  })
+  return procesarRespuesta<string[]>(response, "No fue posible listar los documentos de candidaturas")
+}
+
 export async function registrarCandidatura(payload: RegistrarCandidaturaPayload): Promise<CandidaturaRespuesta> {
   const response = await fetch(buildGatewayUrl(CANDIDATURAS_BASE), {
     method: "POST",
@@ -147,4 +159,15 @@ export async function listarVersiones(candidaturaId: number): Promise<Candidatur
     headers: createJsonHeaders(getToken()),
   })
   return procesarRespuesta<CandidaturaVersion[]>(response, "No fue posible listar las versiones")
+}
+
+export async function subirFotoCandidatura(candidaturaId: number, archivo: File): Promise<CandidaturaRespuesta> {
+  const formData = new FormData()
+  formData.append("archivo", archivo)
+  const response = await fetch(buildGatewayUrl(`${CANDIDATURAS_BASE}/${candidaturaId}/foto`), {
+    method: "POST",
+    headers: createHeadersWithAuth(),
+    body: formData,
+  })
+  return procesarRespuesta<CandidaturaRespuesta>(response, "No fue posible subir la foto del candidato")
 }
