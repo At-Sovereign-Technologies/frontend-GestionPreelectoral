@@ -38,13 +38,13 @@ VITE_JURADOS_API_URL=http://localhost:8083   # MockJurados-service (directo o v�
 
 | Método | Endpoint | Descripción | Usado en |
 |---|---|---|---|
-| `GET` | `/api/gestion-pre-electoral/censo/elecciones` | Listar elecciones configuradas | `GestionCenso.tsx` |
-| `GET` | `/api/gestion-pre-electoral/censo/elecciones/{id}/registros` | Listar registros de censo | `GestionCenso.tsx` |
-| `POST` | `/api/gestion-pre-electoral/censo/registros` | Registrar ciudadano manualmente | `GestionCenso.tsx` |
-| `PUT` | `/api/gestion-pre-electoral/censo/registros/{id}` | Actualizar estado de registro | `GestionCenso.tsx` |
-| `POST` | `/api/gestion-pre-electoral/censo/importaciones/csv` | Importar censo desde CSV | `GestionCenso.tsx` |
-| `POST` | `/api/gestion-pre-electoral/censo/importaciones/api` | Importar censo desde API externa | `GestionCenso.tsx` |
-| `GET` | `/api/gestion-pre-electoral/censo/elecciones/{id}/causales` | Obtener causales de la elección | `GestionCenso.tsx` |
+| `GET` | `/api/censo/elecciones` | Listar elecciones configuradas | `GestionCenso.tsx` |
+| `GET` | `/api/censo/elecciones/{id}/registros` | Listar registros de censo | `GestionCenso.tsx` |
+| `POST` | `/api/censo/registros` | Registrar ciudadano manualmente | `GestionCenso.tsx` |
+| `PUT` | `/api/censo/registros/{id}` | Actualizar estado de registro | `GestionCenso.tsx` |
+| `POST` | `/api/censo/importaciones/csv` | Importar censo desde CSV | `GestionCenso.tsx` |
+| `POST` | `/api/censo/importaciones/api` | Importar censo desde API externa | `GestionCenso.tsx` |
+| `GET` | `/api/censo/elecciones/{id}/causales` | Obtener causales de la elección | `GestionCenso.tsx` |
 
 ### MockJurados-service (M3 - Mock de Jurados de Votación)
 

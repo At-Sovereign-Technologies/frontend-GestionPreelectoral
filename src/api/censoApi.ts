@@ -47,7 +47,7 @@ export interface ImportarCensoApiPayload {
   url: string
 }
 
-const CENSO_BASE = "/api/gestion-pre-electoral/censo"
+const CENSO_BASE = "/api/censo"
 const ELECCIONES_BASE = `${CENSO_BASE}/elecciones`
 
 async function procesarRespuesta<T>(response: Response, fallbackMessage: string): Promise<T> {

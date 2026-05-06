@@ -1,4 +1,4 @@
-const DEFAULT_GATEWAY_URL = "https://eleccion.sello-legitimo.site"
+const DEFAULT_GATEWAY_URL = "https://preeleccion.sello-legitimo.site:8091"
 
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "")

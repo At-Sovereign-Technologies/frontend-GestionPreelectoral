@@ -3,7 +3,7 @@ import { debugLog } from "../utils/debugLogger"
 
 // Endpoint real del microservicio expuesto a través del gateway.
 // El gateway valida el JWT antes de redirigir. No se necesita un endpoint dedicado de validación.
-const ELECCIONES_PATH = "/api/gestion-pre-electoral/censo/ping"
+const ELECCIONES_PATH = "/api/censo/ping"
 
 /**
  * Verifica que el JWT sea aceptado por el gateway realizando una petición real al microservicio.

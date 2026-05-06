@@ -6,13 +6,12 @@ import {
   ChevronRight,
   RefreshCw,
   Plus,
-  Clock,
   Upload,
   X,
   UserPlus,
   CircleAlert,
 } from "lucide-react"
-import UserMenu from "../components/UserMenu"
+import PageHeader from "../components/PageHeader"
 import ComingSoonToast from "../components/ComingSoonToast"
 import Footer from "../components/Footer"
 import {
@@ -444,41 +443,7 @@ export default function GestionCenso() {
     <div className="notranslate min-h-screen bg-gray-50 flex flex-col" translate="no">
 
       {/* ── Encabezado ─────────────────────────────────────────────────────── */}
-      <header className="bg-white border-b px-8 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-red-500 rounded flex items-center justify-center">
-            <span className="text-white text-xs font-bold">SL</span>
-          </div>
-          <div className="leading-tight">
-            <p className="font-bold text-sm text-gray-900">Sello Legítimo</p>
-            <p className="text-red-500 text-[10px] font-semibold tracking-wider">
-              M2: GESTIÓN PRE-ELECTORAL
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-6">
-          {/* Historial de auditoría */}
-          <button
-            onClick={() => abrirToast("El historial de auditoría se integrará en la siguiente iteración.")}
-            className="hidden md:flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 transition"
-          >
-            <Clock size={15} />
-            Historial de Auditoría
-          </button>
-
-          {/* Importar censo */}
-          <button
-            onClick={() => setModalActivo("IMPORTAR")}
-            className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition"
-          >
-            <Upload size={14} />
-            Importar Censo
-          </button>
-
-          <UserMenu />
-        </div>
-      </header>
+      <PageHeader />
 
       {/* ── Contenido principal ─────────────────────────────────────────────── */}
       <main className="flex-1 px-8 py-6 w-full">
@@ -547,6 +512,15 @@ export default function GestionCenso() {
                 >
                   <RefreshCw size={14} />
                   Actualizar
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setModalActivo("IMPORTAR")}
+                  className="inline-flex items-center gap-2 rounded-lg bg-red-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-600"
+                >
+                  <Upload size={14} />
+                  Importar Censo
                 </button>
 
                 {/* Filtros */}

@@ -11,7 +11,7 @@ import {
   ShieldAlert,
 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
-import UserMenu from "../components/UserMenu"
+import PageHeader from "../components/PageHeader"
 import ComingSoonToast from "../components/ComingSoonToast"
 import Footer from "../components/Footer"
 import {
@@ -245,22 +245,7 @@ export default function GestionExcusas() {
   return (
     <div className="notranslate min-h-screen bg-gray-50 flex flex-col" translate="no">
       {/* ── Encabezado ─────────────────────────────────────────────────────── */}
-      <header className="bg-white border-b px-8 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-red-500 rounded flex items-center justify-center">
-            <span className="text-white text-xs font-bold">SL</span>
-          </div>
-          <div className="leading-tight">
-            <p className="font-bold text-sm text-gray-900">Sello Legítimo</p>
-            <p className="text-red-500 text-[10px] font-semibold tracking-wider">
-              M2: GESTIÓN PRE-ELECTORAL
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <UserMenu />
-        </div>
-      </header>
+      <PageHeader />
 
       {/* ── Contenido principal ─────────────────────────────────────────────── */}
       <main className="flex-1 px-8 py-6 w-full">
